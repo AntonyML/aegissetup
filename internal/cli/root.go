@@ -50,7 +50,7 @@ Subcomandos:
   setup-app  DSN SIDC_SQL 32-bit + OCX legacy + verifica exe/reportes + parche _DOCKER.
   check      Verifica que App y DB se hablan (TCP + SQL + DSN + ficheros).
   dashboard  Panel de estado no interactivo.
-  menu       Menú interactivo (1=db 2=app 3=check 4=dashboard).
+  menu       Menú interactivo (0=instalación completa, 1=db, 2=app, 3=check, 4-6=presets).
   configure  Genera config.json inicial.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if isTerminal(os.Stdin) {

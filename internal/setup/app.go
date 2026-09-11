@@ -115,12 +115,21 @@ func InstallOCX(legacyDir string, out func(string)) []string {
 	return failed
 }
 
+// DockerPatchBudget es el maximo de chars que puede medir la clave del parche
+// _DOCKER con un usuario dado. Sale de la aritmetica del slot: el parche
+// reemplaza "Initial Catalog=SIDC" (20 chars) por "UID=<user>;PWD=<pass>".
+// Es la fuente unica de la regla: la usan el parche y la validacion previa del
+// TUI, para que el prompt no acepte algo que el parche va a rechazar.
+func DockerPatchBudget(user string) int {
+	return 20 - len("UID=") - len(";PWD=") - len(user)
+}
+
 // PatchDockerExe crea/copia _DOCKER.exe con UID/PWD embebidos sin alargar
 // el binario: reemplaza "Initial Catalog=SIDC" (20 chars) por
 // "UID=<user>;PWD=<pass>" que debe medir <=20 chars + null.
 // Es solo para Docker/dev con SQL Auth. Prod con Windows Auth no lo necesita.
 func PatchDockerExe(appDir, user, pass string, out func(string)) error {
-	if len("UID="+user+";PWD="+pass) > 20 {
+	if len(pass) > DockerPatchBudget(user) {
 		return fmt.Errorf("UID/PWD muy largos para el parche (max 20 chars en total 'UID=u;PWD=p'): recibí %d",
 			len("UID="+user+";PWD="+pass))
 	}
