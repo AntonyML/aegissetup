@@ -1,0 +1,35 @@
+============================================================
+ AEGIS · DÓNDE DEJAR EL .BAK (SQL 2014)
+============================================================
+PARA QUÉ
+  Aquí dejas el respaldo de la base SIDC traído de la PC vieja
+  (prod: servidor CONTABILIDAD, SQL 2014 Express). Aegis lo toma
+  de aquí para restaurarlo. OJO: es 2014, no 2012.
+
+PASO 1 · Generar el .bak en prod (solo lectura, no borra nada)
+  En SSMS conectado a CONTABILIDAD, ejecuta:
+    BACKUP DATABASE [SIDC]
+    TO DISK = 'C:\AuditoriaLicencias\backups\SIDC_2014_COPYONLY_20260911.bak'
+    WITH COPY_ONLY, CHECKSUM, STATS = 10;
+  Cambia 20260911 por la fecha de hoy (formato AAAAMMDD).
+  Usa COPY_ONLY para no romper la cadena de respaldos. Sin la
+  opción COMPRESSION (Express no la soporta).
+
+PASO 2 · Traerlo aquí
+  Copia ese .bak a ESTA carpeta. No lo renombres con espacios
+  ni tildes. Este archivo nunca se modifica: Docker lo monta en
+  solo-lectura y el restore escribe al volumen. Tampoco sube a
+  GitHub (está en .gitignore).
+
+PASO 3 · Restaurar
+    aegis setup-db
+  Toma el .bak más nuevo de esta carpeta. Al final debe decir:
+    OK: SIDC compat=120 collation=Modern_Spanish_CI_AS
+
+SI FALLA
+  "no hay .bak" ..... no copiaste el archivo a esta carpeta.
+  "FILELISTONLY" .... el servicio SQL no puede leer la ruta del .bak.
+  "collation" ....... verifica con SELECT DATABASEPROPERTYEX('SIDC','Collation').
+
+------------------------------------------------------------
+© Antony Monge López — Costa Rica — Céd. 604700548

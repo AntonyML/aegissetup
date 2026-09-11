@@ -1,0 +1,83 @@
+============================================================
+ AEGIS · ARCHIVOS LEGACY DE LA PC VIEJA (VB6) — LISTA COMPLETA
+============================================================
+PARA QUÉ
+  SIDC es VB6 (2017). En una PC nueva faltan 3 grupos. Sin el
+  grupo 1 da "Run-time error 339" y la pantalla no abre.
+
+GRUPO 1 · OBLIGATORIO — se registran (11 archivos)
+  Sin estos hay error 339. Van EN ESTA CARPETA:
+    MSCOMCT2.OCX   calendario (el que falló en Presupuestos)
+    MSCOMCTL.OCX   barra/menús/listview
+    MSFLXGRD.OCX   grillas
+    MSMASK32.OCX   campos con máscara
+    TABCTL32.OCX   pestañas
+    RICHTX32.OCX   textos enriquecidos
+    MSDATGRD.OCX   grilla de datos
+    MSADODC.OCX    conector ADO
+    MSSTDFMT.DLL   formatos
+    MSBIND.DLL     binding
+    MSDBRPTR.DLL   reportes ligados
+
+GRUPO 2 · RECOMENDADO — solo se copian, sin registrar (11 archivos)
+  Sin estos la app abre, pero controles salen en inglés o fallan
+  pantallas con data-binding. Cópialos también si existen:
+    RCHTXES.DLL MSMSKES.DLL TABCTES.DLL FLXGDES.DLL
+    MSCC2ES.DLL MSCMCES.DLL STDFTES.DLL DATGDES.DLL
+    VB5DB.DLL DBRPRES.DLL ADODCES.DLL
+
+GRUPO 3 · CRYSTAL REPORTS — instalador aparte (ver ..\crystal\LEEME.txt)
+  Los 57 reportes ocupan su runtime (~40 DLLs: crpe32, craxdrt,
+  crviewer...). No se copian a mano, se instala.
+
+YA LO TRAE WINDOWS — no copiar:
+  msvbvm60.dll, OLEAUT32, STDOLE2, Jet (msjet40), DAO360,
+  mfc42, msvcrt.
+
+PASO 1 · Copiar desde prod (una sola vez, CMD en la PC vieja)
+    mkdir C:\SIDC_OCX
+    copy C:\Windows\SysWOW64\MSCOMCT2.OCX C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSCOMCTL.OCX C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSFLXGRD.OCX C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSMASK32.OCX C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\TABCTL32.OCX C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\RICHTX32.OCX C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSDATGRD.OCX C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSADODC.OCX  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSSTDFMT.DLL C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSBIND.DLL   C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSDBRPTR.DLL C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\RCHTXES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSMSKES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\TABCTES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\FLXGDES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSCC2ES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\MSCMCES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\STDFTES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\DATGDES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\VB5DB.DLL    C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\DBRPRES.DLL  C:\SIDC_OCX\
+    copy C:\Windows\SysWOW64\ADODCES.DLL  C:\SIDC_OCX\
+  Pega todo EN ESTA CARPETA. No bajes OCX de internet
+  (otra versión = más errores).
+
+PASO 2 · Instalar (lo hace el programa solo)
+  Tu única parte manual: abrir la terminal COMO ADMINISTRADOR.
+  Cómo: Inicio > escribe cmd > click derecho en "Símbolo del
+  sistema" > Ejecutar como administrador > Sí. Sin esto Windows
+  no deja registrar y fallará.
+  Luego ejecuta y el programa hace el resto solo, sin preguntas:
+    aegis setup-app
+  Él solo: 1. copia los 22 archivos a C:\Windows\SysWOW64.
+           2. registra el grupo 1 (verás "OCX OK: ...").
+           3. deja constancia del grupo 2 ("SOPORTE OK: ...").
+  Tú no copias ni registras nada a mano en este paso.
+
+RESULTADO ESPERADO
+  Al terminar verás "OCX OK: MSCOMCT2.OCX" y las demás.
+  Si alguna dice "OCX PENDIENTE", ese archivo falta en esta
+  carpeta: repite el paso 1 solo para ese nombre.
+  Luego abre SIDC: Presupuestos entra sin error 339.
+
+------------------------------------------------------------
+© Antony Monge López — Costa Rica — Céd. 604700548

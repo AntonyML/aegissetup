@@ -1,0 +1,60 @@
+============================================================
+ AEGIS · DOCKER DEV PASO A PASO (SQL 2014 -> 2019)
+============================================================
+PARA QUÉ
+  Levantar un SQL de pruebas idéntico a prod sin tocar prod:
+  base SIDC, collation Modern_Spanish_CI_AS, compat 120 (modo
+  2014). La app VB6 solo ve DSN de 32-bit, por eso el puerto
+  14333 (no choca con un SQL local en 1433).
+
+REQUISITOS
+  Docker Desktop con plugin compose. El .bak ya debe estar en
+  assets\backups\sqlserver2014\ (ver su LEEME).
+
+PASO 1 · Configurar (una vez, desde la raíz del repo)
+    copy docker\.env.example docker\.env
+  Revisa docker\.env: SQL_COLLATION debe ser Modern_Spanish_CI_AS
+  (igual que prod). Solo se aplica al crear el contenedor la
+  primera vez.
+
+PASO 2 · Levantar
+    cd docker
+    docker compose up -d
+    docker logs sidc_sql2019 --tail 20
+  Espera esta línea:
+    "SQL Server is now ready for client connections".
+
+PASO 3 · Restaurar (con Aegis, recomendado)
+    cd ..
+    .\bin\aegis.exe setup-db
+  Hace solo: FILELISTONLY -> RESTORE ... WITH MOVE -> compat 120
+  -> CHECKDB -> crea login app. Final esperado:
+    OK: SIDC compat=120 collation=Modern_Spanish_CI_AS
+  (El flujo manual viejo con migrate.ps1 quedó jubilado en
+  scripts\legacy\.)
+
+PASO 4 · DSN de 32-bit (VB6 solo ve 32-bit)
+  Opción A (recomendada):
+    .\bin\aegis.exe setup-app --save-pwd --patch-docker   (SOLO dev/docker)
+  Opción B (manual): C:\Windows\SysWOW64\odbcad32.exe > System DSN >
+    Name SIDC_SQL, Driver ODBC Driver 17, Server localhost,14333,
+    SQL Auth con el login de config (default dev) y clave de
+    AEGIS_SQL_PASSWORD, Default DB SIDC, Test SUCCESS.
+
+PASO 5 · Probar
+    .\bin\aegis.exe check
+  Esperado: 5 OK (TCP, SQL compat=120, DSN, CRYSTAL, App ficheros).
+  Si CRYSTAL da FAIL, ve a assets\legacy\crystal\LEEME.txt.
+
+APAGAR / LIMPIAR (desde docker\)
+  docker compose down      (mantiene datos)
+  docker compose down -v   (borra todo; úsalo si cambias collation)
+
+TRUCO PROD
+  Para que el DSN cree que habla con prod, agrega al hosts
+  (C:\Windows\System32\drivers\etc\hosts):
+    127.0.0.1  CONTABILIDAD
+  y usa Server CONTABILIDAD,14333.
+
+------------------------------------------------------------
+© Antony Monge López — Costa Rica — Céd. 604700548

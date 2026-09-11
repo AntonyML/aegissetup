@@ -1,0 +1,13 @@
+============================================================
+ AEGIS · DATOS DE LA PC VIEJA
+============================================================
+Aquí NO se deja ningún instalador. Haz esto:
+  1. Copia NOTAS.ejemplo.txt a NOTAS.txt (en esta carpeta).
+  2. Abre NOTAS.txt: trae 4 comandos PowerShell listos para
+     copiar-pegar en LA PC VIEJA. Pega cada salida en su espacio.
+  3. Configura la PC nueva con esos datos:
+       aegis configure --env prod --db-mode server --server XXXX
+NOTAS.txt nunca sube a GitHub (está en .gitignore).
+
+------------------------------------------------------------
+© Antony Monge López — Costa Rica — Céd. 604700548

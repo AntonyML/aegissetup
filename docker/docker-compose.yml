@@ -1,0 +1,32 @@
+# © Antony Monge López — Costa Rica — Céd. 604700548
+# Aegis Setup · SQL dev en Docker (réplica de prod CONTABILIDAD / SIDC).
+#
+# Prod real: Server=CONTABILIDAD, Database=SIDC (SQL 2014 Express 12.0.2000.8),
+# Collation Modern_Spanish_CI_AS, Trusted_Connection=Yes, Driver SQL Server.
+#
+# No existe imagen Docker oficial de SQL 2014 (solo Windows). Se usa 2019
+# Developer —liviano con mem_limit 2g— que restaura .bak 2014 directo y se
+# deja en COMPATIBILITY_LEVEL 120 (modo 2014). 2022 pesa más y Edge recorta
+# funciones (Agent, etc.).
+services:
+  sqlsidc:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: sidc_sql2019
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      MSSQL_SA_PASSWORD: "${SA_PASSWORD:-Sidc*2026*Dev}"
+      MSSQL_COLLATION: "${SQL_COLLATION:-Modern_Spanish_CI_AS}"
+      MSSQL_LCID: "3082" # español moderno = Language del DSN en prod
+    ports:
+      - "${SQL_PORT:-14333}:1433"
+    volumes:
+      - sqlsidc_data:/var/opt/mssql
+      # El .bak se deja en assets/backups/sqlserver2014 (solo lectura).
+      - ../assets/backups/sqlserver2014:/var/opt/mssql/backup:ro
+      - ./init:/var/opt/mssql/init
+    mem_limit: 2g
+    restart: unless-stopped
+
+volumes:
+  sqlsidc_data:

@@ -1,0 +1,14 @@
+============================================================
+ SCRIPTS LEGACY (no usar salvo emergencia)
+============================================================
+migrate.ps1 + LoadEnv.ps1 + README-original.txt eran el flujo manual
+anterior para restaurar el .bak 2014 en Docker (FILELISTONLY ->
+RESTORE -> compat 120 -> login). Hoy los reemplaza:
+
+    .\bin\aegis.exe setup-db
+
+Se conservan aquí como referencia histórica. El flujo vigente está en
+docker\GUIA-DOCKER.txt y en el menú:  .\bin\aegis.exe menu
+
+------------------------------------------------------------
+© Antony Monge López — Costa Rica — Céd. 604700548

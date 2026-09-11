@@ -1,0 +1,261 @@
+// © Antony Monge López — Costa Rica — Céd. 604700548
+// Package setup implementa los dos setups: DB y App.
+package setup
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"aegis-setup/internal/config"
+
+	_ "github.com/microsoft/go-mssqldb"
+)
+
+// FindNewestBak devuelve el .bak más nuevo del BackupDir.
+func FindNewestBak(dir string) (string, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("backup_dir %s: %w", dir, err)
+	}
+	var cands []string
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		if strings.EqualFold(filepath.Ext(e.Name()), ".bak") {
+			cands = append(cands, filepath.Join(dir, e.Name()))
+		}
+	}
+	if len(cands) == 0 {
+		return "", fmt.Errorf("no hay .bak en %s (deja ahí el respaldo de la PC vieja)", dir)
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		fi, _ := os.Stat(cands[i])
+		fj, _ := os.Stat(cands[j])
+		if fi == nil || fj == nil {
+			return cands[i] < cands[j]
+		}
+		return fi.ModTime().After(fj.ModTime())
+	})
+	return cands[0], nil
+}
+
+// dockerBakMount es el directorio de respaldos *dentro* del motor SQL cuando la
+// base corre en Docker. Tiene que coincidir con el bind :ro de
+// AegisSetup/docker/docker-compose.yml; si allá cambia, acá también.
+const dockerBakMount = "/var/opt/mssql/backup"
+
+// isEnginePath reconoce una ruta que ya es la que ve el motor SQL, no la de
+// Windows. El operador puede pasarla directo por --bak.
+func isEnginePath(cfg config.Config, bakPath string) bool {
+	return cfg.DbMode == config.DbDocker && strings.HasPrefix(bakPath, dockerBakMount+"/")
+}
+
+// bakPathForEngine traduce la ruta local del .bak a la que ve el motor SQL.
+// En Docker el motor corre en un contenedor Linux que no tiene C:\: el respaldo
+// se monta :ro en dockerBakMount, así que una ruta Windows no le dice nada y el
+// FILELISTONLY falla antes de restaurar.
+func bakPathForEngine(cfg config.Config, bakPath string) string {
+	if cfg.DbMode != config.DbDocker || isEnginePath(cfg, bakPath) {
+		return bakPath
+	}
+	return dockerBakMount + "/" + filepath.Base(bakPath)
+}
+
+// localStatNeeded dice si la ruta del .bak hay que validarla contra el sistema
+// de archivos local. En Docker el operador puede pasar la ruta que ve el motor,
+// que por definición no existe en Windows: validarla dejaría --bak inutilizable.
+func localStatNeeded(cfg config.Config, bakPath string) bool {
+	return !isEnginePath(cfg, bakPath)
+}
+
+// adminDSN arma conexión SA/master contra el Server configurado.
+// ODBC usa "host,puerto" pero go-mssqldb exige "host:puerto".
+func adminDSN(cfg config.Config, saPass string) string {
+	srv := strings.Replace(cfg.Server, ",", ":", 1)
+	return fmt.Sprintf("sqlserver://sa:%s@%s?database=master&dial+timeout=15&encrypt=disable", urlEscape(saPass), srv)
+}
+
+func urlEscape(s string) string {
+	r := strings.NewReplacer(":", "%3A", "@", "%3A", "/", "%2F", "?", "%3F", "#", "%23", " ", "%20", "*", "%2A")
+	return r.Replace(s)
+}
+
+// SetupDB restaura el .bak más nuevo como cfg.Database, fija compat,
+// crea login/usuario de app (solo SQL Auth) y corre CHECKDB.
+// saPass viene de env AEGIS_SA_PASSWORD. appPass de AEGIS_SQL_PASSWORD.
+// En prod local/server con Windows Auth igual se restaura vía SA o vía
+// trusted (si saPass vacío se usa trusted).
+func SetupDB(ctx context.Context, cfg config.Config, bakPath, saPass, appPass string, out func(string)) error {
+	if bakPath == "" {
+		var err error
+		bakPath, err = FindNewestBak(cfg.BackupDir)
+		if err != nil {
+			return err
+		}
+	}
+	out("BAK: " + bakPath)
+
+	db, err := openAdmin(ctx, cfg, saPass)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// El .bak de prod vive en el servidor; para Docker se monta :ro en
+	// /var/opt/mssql/backup/. La ruta que se le manda al motor no es la de
+	// Windows: en Docker hay que traducirla al punto de montaje del contenedor.
+	if localStatNeeded(cfg, bakPath) {
+		if _, err := os.Stat(bakPath); err != nil {
+			return fmt.Errorf("no se puede leer %s: %w", bakPath, err)
+		}
+	}
+	engineBak := bakPathForEngine(cfg, bakPath)
+	if engineBak != bakPath {
+		out("motor: " + engineBak)
+	}
+
+	logical, err := fileListOnly(ctx, db, engineBak)
+	if err != nil {
+		return fmt.Errorf("FILELISTONLY: %w (revisa que el .bak sea de %s y el servicio SQL pueda leerlo)", err, cfg.Database)
+	}
+	out(fmt.Sprintf("DATA=%s LOG=%s", logical.data, logical.log))
+
+	restore := fmt.Sprintf(`RESTORE DATABASE [%s] FROM DISK = @p1 WITH REPLACE,
+	  MOVE @p2 TO '/var/opt/mssql/data/%s.mdf',
+	  MOVE @p3 TO '/var/opt/mssql/data/%s_log.ldf'`, cfg.Database, cfg.Database, cfg.Database)
+	// En SQL Windows local las rutas Linux no aplican; el servidor decide.
+	// Por eso primero intentamos rutas Linux (Docker) y si falla, con .mdf locales del DATA dir.
+	if err := execQ(ctx, db, restore, engineBak, logical.data, logical.log); err != nil {
+		// Fallback Windows: deja que SQL ponga los archivos en su DATA default.
+		out("MOVE Linux falló, reintento con rutas default del servidor...")
+		restore2 := fmt.Sprintf(`RESTORE DATABASE [%s] FROM DISK = @p1 WITH REPLACE`, cfg.Database)
+		if err2 := execQ(ctx, db, restore2, engineBak); err2 != nil {
+			return fmt.Errorf("RESTORE: %v / %v", err, err2)
+		}
+	}
+	out("RESTORE OK")
+
+	if err := execQ(ctx, db, fmt.Sprintf(`ALTER DATABASE [%s] SET COMPATIBILITY_LEVEL = %d`, cfg.Database, cfg.Compat)); err != nil {
+		return fmt.Errorf("compat %d: %w", cfg.Compat, err)
+	}
+	if err := execQ(ctx, db, fmt.Sprintf(`DBCC CHECKDB ([%s]) WITH NO_INFOMSGS`, cfg.Database)); err != nil {
+		return fmt.Errorf("CHECKDB: %w", err)
+	}
+	out("CHECKDB sin errores")
+
+	if !cfg.UseWinAuth {
+		if appPass == "" {
+			return fmt.Errorf("falta AEGIS_SQL_PASSWORD para crear el login %s", cfg.SQLUser)
+		}
+		stmts := []string{
+			fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = '%s') CREATE LOGIN [%s] WITH PASSWORD = '%s', DEFAULT_DATABASE = [%s], DEFAULT_LANGUAGE = us_english, CHECK_POLICY = OFF`,
+				esc(cfg.SQLUser), esc(cfg.SQLUser), escPass(appPass), esc(cfg.Database)),
+			fmt.Sprintf(`ALTER LOGIN [%s] ENABLE`, esc(cfg.SQLUser)),
+			fmt.Sprintf(`USE [%s]; IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '%s') BEGIN CREATE USER [%s] FOR LOGIN [%s]; ALTER ROLE db_owner ADD MEMBER [%s]; END`,
+				esc(cfg.Database), esc(cfg.SQLUser), esc(cfg.SQLUser), esc(cfg.SQLUser), esc(cfg.SQLUser)),
+		}
+		for _, s := range stmts {
+			if err := execQ(ctx, db, s); err != nil {
+				return fmt.Errorf("login app: %w", err)
+			}
+		}
+		out("login app OK: " + cfg.SQLUser)
+	} else {
+		out("Windows Auth: no se crea login SQL (prod usa AD como CONTABILIDAD)")
+	}
+
+	var name string
+	var level int
+	var coll string
+	err = db.QueryRowContext(ctx, `SELECT name, compatibility_level, collation_name FROM sys.databases WHERE name = @p1`, cfg.Database).Scan(&name, &level, &coll)
+	if err != nil {
+		return err
+	}
+	out(fmt.Sprintf("OK: %s compat=%d collation=%s", name, level, coll))
+	return nil
+}
+
+type fileNames struct{ data, log string }
+
+func fileListOnly(ctx context.Context, db *sql.DB, bak string) (fileNames, error) {
+	rows, err := db.QueryContext(ctx, `RESTORE FILELISTONLY FROM DISK = @p1`, bak)
+	if err != nil {
+		return fileNames{}, err
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	var data, log string
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return fileNames{}, err
+		}
+		m := map[string]string{}
+		for i, c := range cols {
+			m[strings.ToLower(c)] = fmt.Sprint(vals[i])
+		}
+		typ := m["type"]
+		logic := m["logicalname"]
+		if logic == "" {
+			logic = m["logical_name"]
+		}
+		switch strings.ToUpper(typ) {
+		case "D":
+			if data == "" {
+				data = logic
+			}
+		case "L":
+			if log == "" {
+				log = logic
+			}
+		}
+	}
+	if data == "" || log == "" {
+		return fileNames{}, fmt.Errorf("no se encontraron DATA/LOG en el .bak")
+	}
+	return fileNames{data, log}, rows.Err()
+}
+
+func openAdmin(ctx context.Context, cfg config.Config, saPass string) (*sql.DB, error) {
+	var dsn string
+	if saPass == "" {
+		// Windows Auth (prod local/server con AD).
+		srv := strings.Replace(cfg.Server, ",", ":", 1)
+		dsn = fmt.Sprintf("sqlserver://%s?database=master&dial+timeout=15&encrypt=disable&trusted+connection=yes", srv)
+	} else {
+		dsn = adminDSN(cfg, saPass)
+	}
+	db, err := sql.Open("sqlserver", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetConnMaxLifetime(time.Minute)
+	ctx2, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx2); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("conectar a %s: %w", cfg.Server, err)
+	}
+	return db, nil
+}
+
+func execQ(ctx context.Context, db *sql.DB, q string, args ...any) error {
+	ctx2, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	_, err := db.ExecContext(ctx2, q, args...)
+	return err
+}
+
+func esc(s string) string     { return strings.ReplaceAll(s, "]", "]]") }
+func escPass(s string) string { return strings.ReplaceAll(s, "'", "''") }

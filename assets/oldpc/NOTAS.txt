@@ -1,0 +1,38 @@
+============================================================
+ AEGIS · DATOS DE PROD — LLENADO DESDE LA PC VIEJA
+ Fecha: 2026-09-11 · Equipo: CONTABILIDAD · Usuario: vbadilla
+============================================================
+
+1. DSN SIDC_SQL (sale del User DSN; el System DSN está vacío)
+   Server:             CONTABILIDAD
+   Database:           SIDC
+   Driver:             C:\WINDOWS\system32\SQLSRV32.dll  (SQL Server legacy)
+   Trusted_Connection: Yes
+
+2. SERVIDOR Y BASES
+   Servidor real:      CONTABILIDAD
+   Existe SIDC (sí/no): sí  (master, model, msdb, SIDC, tempdb)
+
+3. COLLATION
+   Collation:          Modern_Spanish_CI_AS
+   NOTA: el login vbadilla (no sysadmin) ve NULL en prod
+   (DATABASEPROPERTYEX y sys.databases ocultan columnas sin
+   permiso), pero el restore en Docker como sa confirmó
+   "SIDC 120 Modern_Spanish_CI_AS". Se usa ese valor.
+
+4. USUARIOS DE LA APP (tabla Usuarios, 11 filas)
+   Adminc      Sistema
+   Admine      Sistema
+   Adminm      Sistema
+   cristina    Administrador
+   Johnny      Administrador
+   marco       Administrador
+   Marlene     Usuario
+   mjimenez    Usuario
+   Rodrigo     Administrador
+   Transporte  Usuario
+   viviana     Administrador
+
+------------------------------------------------------------
+© Antony Monge López — Costa Rica — Céd. 604700548
+NOTA: este archivo está en .gitignore y nunca sube a GitHub.

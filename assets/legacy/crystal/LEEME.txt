@@ -1,0 +1,75 @@
+============================================================
+ AEGIS · CRYSTAL REPORTS 8 (runtime de los 57 reportes)
+============================================================
+PARA QUÉ
+  Los 57 .rpt de SIDC se abren con Crystal Reports 8. Sin su
+  runtime la app entra pero al generar cualquier reporte falla
+  (error de impresión / database DLL / craxdrt).
+  Lista verificada contra el instalador original de prod
+  (ST6UNST.LOG): los patrones u2*/p2*/crxf* traen los ~30
+  restantes, no falta ninguno.
+
+CÓMO SE CONSIGUE (en este orden)
+  1. Instalador original de Crystal 8 / 8.5 (Setup.exe o CD que
+     usaron en prod). Es lo mejor. Pregunta a quien instaló la
+     PC vieja o busca en sus discos/USBs.
+  2. Si no aparece: se saca de la PC vieja (paso 1 abajo).
+  NO se descarga de internet: la versión 8 salió en 2001 y SAP
+  ya no la vende; la versión nueva (2020) NO sirve para esta
+  app vieja y los "packs" de internet traen virus o versiones
+  que no calzan.
+
+PASO 0 · Ver si te hace falta (lo revisa el programa solo)
+  Tú solo ejecuta:
+    .\bin\aegis.exe check
+  El programa revisa SysWOW64 solo y te muestra la línea CRYSTAL:
+    OK   CRYSTAL runtime .... ya está, no hagas nada más aquí.
+    FAIL CRYSTAL runtime .... faltan archivos, sigue al paso 1.
+
+PASO 1 · Sacar los archivos de la PC vieja (manual, CMD en prod)
+  Esto es a mano porque son archivos de otra PC. Ejecuta una
+  por una estas líneas:
+    mkdir C:\SIDC_CRYSTAL
+    copy C:\Windows\SysWOW64\crpe32.dll    C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\Crystl32.OCX  C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\craxdrt.dll   C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\craxddrt.dll  C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\crviewer.dll  C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\Crpaig80.dll  C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\Crxlat32.dll  C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\sscsdk80.dll  C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\u2*.dll       C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\p2*.dll       C:\SIDC_CRYSTAL\
+    copy C:\Windows\SysWOW64\crxf*.dll     C:\SIDC_CRYSTAL\
+  Los u2*/p2*/crxf* con * traen los ~30 archivos de exportación
+  y conexiones de una vez. Pasa la carpeta a la PC nueva por USB.
+  OJO: en el paso 1 se COPIAN todos (~40) pero en el paso 2 solo
+  se REGISTRAN 4. Es normal: los u2*/p2*/crxf*/Crpaig80/Crxlat32/
+  sscsdk80 son DLL comunes que con solo existir en SysWOW64 ya
+  sirven. Solo los 4 componentes COM (los .OCX y visor/motor)
+  ocupan registro.
+
+PASO 2 · Ponerlos en la PC nueva (manual, CMD como Administrador)
+  Aegis todavía no instala Crystal solo, esto va a mano. Abre CMD
+  como Administrador (Inicio > cmd > click derecho > Ejecutar
+  como administrador) y ejecuta:
+    copy C:\SIDC_CRYSTAL\*.dll C:\Windows\SysWOW64\
+    copy C:\SIDC_CRYSTAL\*.OCX C:\Windows\SysWOW64\
+    C:\Windows\SysWOW64\regsvr32.exe /s C:\Windows\SysWOW64\crviewer.dll
+    C:\Windows\SysWOW64\regsvr32.exe /s C:\Windows\SysWOW64\Crystl32.OCX
+    C:\Windows\SysWOW64\regsvr32.exe /s C:\Windows\SysWOW64\craxdrt.dll
+    C:\Windows\SysWOW64\regsvr32.exe /s C:\Windows\SysWOW64\craxddrt.dll
+  Repite el paso 0: la línea CRYSTAL debe decir OK.
+
+PASO 3 · Probar con un reporte chico (manual, en SIDC)
+  Abre SIDC y genera Rpt_Caja_Chica.rpt.
+  Si pide login viejo (RodrigoG / RODRIGOG-PC), re-apunta el .rpt:
+    Crystal > Database > Set Datasource Location > DSN SIDC_SQL.
+
+SI FALLA
+  "Error starting print job" .... falta runtime o impresora.
+  "Error detected by database DLL"  DSN o credenciales del .rpt.
+  "logon failed" .................. re-apuntar el .rpt al DSN nuevo.
+
+------------------------------------------------------------
+© Antony Monge López — Costa Rica — Céd. 604700548

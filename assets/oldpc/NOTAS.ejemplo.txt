@@ -1,0 +1,38 @@
+============================================================
+ AEGIS · DATOS DE PROD — COPIA, PEGA Y LLENA (una sola vez)
+============================================================
+Cómo: abre PowerShell EN LA PC VIEJA, pega cada comando, y copia
+su salida en los espacios. Todo es solo lectura, nada se modifica.
+
+1. DSN SIDC_SQL (dónde apunta la app hoy)
+   Pega esto:
+     "=== System DSN ==="; Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\ODBC\ODBC.INI\SIDC_SQL" -ErrorAction SilentlyContinue | Format-List Server, Database, Driver, Trusted_Connection; "=== User DSN ==="; Get-ItemProperty "HKCU:\SOFTWARE\ODBC\ODBC.INI\SIDC_SQL" -ErrorAction SilentlyContinue | Format-List Server, Database, Driver, Trusted_Connection
+   Llena con la sección que SÍ traiga datos (la otra saldrá vacía):
+   Server:             _________________________  (ej CONTABILIDAD)
+   Database:           _________________________  (debe ser SIDC)
+   Driver:             _________________________  (ej SQL Server)
+   Trusted_Connection: _________________________  (ej Yes)
+
+2. SERVIDOR Y BASES
+   Pega esto:
+     sqlcmd -S localhost -E -Q "SELECT @@SERVERNAME AS Servidor; SELECT name AS Base FROM sys.databases ORDER BY name;"
+   Servidor real:      _________________________  (ej CONTABILIDAD)
+   Existe SIDC (sí/no): ___
+
+3. COLLATION (tiene que ser este en la PC nueva)
+   Pega esto:
+     sqlcmd -S localhost -E -Q "SELECT DATABASEPROPERTYEX('SIDC','Collation') AS CollationSIDC;"
+   Collation:          _________________________  (ej Modern_Spanish_CI_AS)
+   Si es distinto, avisa ANTES del primer restore.
+
+4. USUARIOS DE LA APP (ventana login de SIDC, NO son de SQL)
+   Pega esto:
+     sqlcmd -S localhost -E -Q "USE SIDC; SELECT NombreUsuario, Tipo_Usuario FROM Usuarios ORDER BY NombreUsuario;"
+   Usuario 1: _________________________
+   Usuario 2: _________________________
+   Usuario 3: _________________________
+
+------------------------------------------------------------
+© Antony Monge López — Costa Rica — Céd. 604700548
+NOTA: copia este archivo a NOTAS.txt y llena la copia.
+NOTAS.txt está en .gitignore y nunca sube a GitHub.
