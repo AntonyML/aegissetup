@@ -63,7 +63,7 @@ Subcomandos:
 		},
 	}
 
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "ruta a config.json (default: config.json junto al binario)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "ruta a config.json (default: %APPDATA%\\AegisSetup\\config.json)")
 	cmd.PersistentFlags().StringVar(&presetServer, "server", "", "server para el preset 'prod server' del TUI (ej. aegis --server MI_SERVIDOR)")
 
 	cmd.AddCommand(newSetupDbCmd(func() (config.Config, string, error) {
@@ -87,10 +87,7 @@ Subcomandos:
 }
 
 func resolveCfg(exeDir, flag string, loader func(string) (config.Config, error)) (config.Config, string, error) {
-	path := flag
-	if path == "" {
-		path = filepath.Join(exeDir, "config.json")
-	}
+	path := configPathToUse(exeDir, flag)
 	cfg, err := loader(path)
 	if err != nil {
 		return config.Config{}, path, fmt.Errorf("%w: %v", ErrConfig, err)
@@ -101,8 +98,40 @@ func resolveCfg(exeDir, flag string, loader func(string) (config.Config, error))
 	return cfg, path, nil
 }
 
+// configPathToUse resuelve qué config.json se usa. El flag manda; si no, se
+// prefiere el canónico de %APPDATA%\AegisSetup y se sigue aceptando el viejo
+// junto al binario para no romper instalaciones previas a F3. Cuando no existe
+// ninguno devuelve el canónico, que es donde se escribe un config nuevo.
+func configPathToUse(exeDir, flag string) string {
+	if flag != "" {
+		return flag
+	}
+	canonico := config.RutaConfig()
+	if existeArchivo(canonico) {
+		return canonico
+	}
+	legado := filepath.Join(exeDir, "config.json")
+	if existeArchivo(legado) {
+		return legado
+	}
+	return canonico
+}
+
+func existeArchivo(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
 func Execute() int {
 	dir := exeDir()
+
+	// Las carpetas de datos (ProgramData) y de config (%APPDATA%) se crean acá.
+	// Es best-effort a propósito: "aegis check" es la herramienta de diagnóstico
+	// y tiene que poder correr justamente cuando algo está mal.
+	if err := config.AsegurarRutas(); err != nil {
+		fmt.Fprintf(os.Stderr, "aviso: %v\n", err)
+	}
+
 	cmd := NewRootCmd(dir, config.Load)
 	if err := cmd.Execute(); err != nil {
 		if errors.Is(err, ErrConfig) {

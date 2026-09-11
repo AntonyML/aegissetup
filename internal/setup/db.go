@@ -46,6 +46,37 @@ func FindNewestBak(dir string) (string, error) {
 	return cands[0], nil
 }
 
+// FindNewestBakCfg busca el .bak en los directorios candidatos de la config.
+// El orden lo decide config.BackupDirs: primero el configurado (ProgramData en
+// una PC instalada) y después el layout viejo junto al binario, para que el
+// flujo dev siga encontrando el respaldo del repo sin configurar nada.
+func FindNewestBakCfg(cfg config.Config) (string, error) {
+	dirs := config.BackupDirs(cfg, exeDir())
+	var sinRespaldo []string
+	for _, dir := range dirs {
+		bak, err := FindNewestBak(dir)
+		if err == nil {
+			return bak, nil
+		}
+		sinRespaldo = append(sinRespaldo, dir)
+	}
+	return "", fmt.Errorf("no hay .bak en ninguna de estas carpetas: %s (dejá ahí el respaldo de la PC vieja)", strings.Join(sinRespaldo, ", "))
+}
+
+// exeDir devuelve la carpeta del binario. Se usa para reconocer el layout viejo
+// de respaldos, que vivía junto al ejecutable.
+func exeDir() string {
+	if exe, err := os.Executable(); err == nil {
+		if dir := filepath.Dir(exe); dir != "" {
+			return dir
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
+}
+
 // dockerBakMount es el directorio de respaldos *dentro* del motor SQL cuando la
 // base corre en Docker. Tiene que coincidir con el bind :ro de
 // AegisSetup/docker/docker-compose.yml; si allá cambia, acá también.
@@ -95,7 +126,7 @@ func urlEscape(s string) string {
 func SetupDB(ctx context.Context, cfg config.Config, bakPath, saPass, appPass string, out func(string)) error {
 	if bakPath == "" {
 		var err error
-		bakPath, err = FindNewestBak(cfg.BackupDir)
+		bakPath, err = FindNewestBakCfg(cfg)
 		if err != nil {
 			return err
 		}

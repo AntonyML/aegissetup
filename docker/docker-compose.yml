@@ -22,8 +22,10 @@ services:
       - "${SQL_PORT:-14333}:1433"
     volumes:
       - sqlsidc_data:/var/opt/mssql
-      # El .bak se deja en assets/backups/sqlserver2014 (solo lectura).
-      - ../assets/backups/sqlserver2014:/var/opt/mssql/backup:ro
+      # El .bak se deja donde diga backup_dir (F3: ProgramData en una PC
+      # instalada). AEGIS_BACKUP_DIR permite apuntar el mount a otra carpeta;
+      # el default mantiene el flujo dev tal como estaba.
+      - ${AEGIS_BACKUP_DIR:-../assets/backups/sqlserver2014}:/var/opt/mssql/backup:ro
       - ./init:/var/opt/mssql/init
     mem_limit: 2g
     restart: unless-stopped

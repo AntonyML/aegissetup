@@ -3,14 +3,13 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"aegis-setup/internal/config"
 
 	"github.com/spf13/cobra"
 )
 
-func newConfigureCmd(exeDir string) *cobra.Command {
+func newConfigureCmd(_ string) *cobra.Command {
 	var env, dbMode, server, out string
 	cmd := &cobra.Command{
 		Use:   "configure",
@@ -43,7 +42,10 @@ func newConfigureCmd(exeDir string) *cobra.Command {
 			}
 			path := out
 			if path == "" {
-				path = filepath.Join(exeDir, "config.json")
+				path = config.RutaConfig()
+				if err := config.AsegurarRutas(); err != nil {
+					return err
+				}
 			}
 			if err := cfg.Save(path); err != nil {
 				return err
@@ -55,6 +57,6 @@ func newConfigureCmd(exeDir string) *cobra.Command {
 	cmd.Flags().StringVar(&env, "env", "", "dev|prod")
 	cmd.Flags().StringVar(&dbMode, "db-mode", "", "docker|local|server")
 	cmd.Flags().StringVar(&server, "server", "", "ej localhost,14333 | localhost | CONTABILIDAD | MI_SERVIDOR")
-	cmd.Flags().StringVar(&out, "out", "", "ruta de salida (default: config.json junto al binario)")
+	cmd.Flags().StringVar(&out, "out", "", "ruta de salida (default: %APPDATA%\\AegisSetup\\config.json)")
 	return cmd
 }

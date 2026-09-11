@@ -23,18 +23,18 @@ const (
 
 // Config es el config.json de Aegis. Un json parcial hace override de defaults.
 type Config struct {
-	Env       string `json:"env"`        // dev | prod
-	DbMode    DbMode `json:"db_mode"`    // docker | local | server
-	Server    string `json:"server"`     // ej dev: localhost,14333 | prod local: localhost | prod server: CONTABILIDAD o MI_SERVIDOR
-	Database  string `json:"database"`   // siempre SIDC (el exe lo trae hardcodeado)
-	DsnName   string `json:"dsn_name"`   // siempre SIDC_SQL
-	Driver    string `json:"driver"`     // prod: SQL Server (legacy) | dev docker: ODBC Driver 17 for SQL Server o SQL Server
-	UseWinAuth bool  `json:"use_win_auth"` // true en prod local/server con AD, false en docker
-	SQLUser   string `json:"sql_user"`   // solo cuando UseWinAuth=false (dev/docker)
+	Env        string `json:"env"`          // dev | prod
+	DbMode     DbMode `json:"db_mode"`      // docker | local | server
+	Server     string `json:"server"`       // ej dev: localhost,14333 | prod local: localhost | prod server: CONTABILIDAD o MI_SERVIDOR
+	Database   string `json:"database"`     // siempre SIDC (el exe lo trae hardcodeado)
+	DsnName    string `json:"dsn_name"`     // siempre SIDC_SQL
+	Driver     string `json:"driver"`       // prod: SQL Server (legacy) | dev docker: ODBC Driver 17 for SQL Server o SQL Server
+	UseWinAuth bool   `json:"use_win_auth"` // true en prod local/server con AD, false en docker
+	SQLUser    string `json:"sql_user"`     // solo cuando UseWinAuth=false (dev/docker)
 	// SQLPassword va por flag/env AEGIS_SQL_PASSWORD, nunca en el json en claro.
-	Collation string `json:"collation"` // ej Modern_Spanish_CI_AS (debe igualar prod)
-	Compat    int    `json:"compat"`    // 120 = SQL 2014 como CONTABILIDAD
-	AppDir    string `json:"app_dir"`   // donde vive SIDC, ej C:\DEV\SIDC
+	Collation string `json:"collation"`  // ej Modern_Spanish_CI_AS (debe igualar prod)
+	Compat    int    `json:"compat"`     // 120 = SQL 2014 como CONTABILIDAD
+	AppDir    string `json:"app_dir"`    // donde vive SIDC, ej C:\DEV\SIDC
 	DockerDir string `json:"docker_dir"` // donde está el compose, ej C:\DEV\SIDC\docker-dev
 	BackupDir string `json:"backup_dir"` // donde dejas el .bak, ej C:\DEV\SIDC\AegisSetup\assets\backups\sqlserver2014
 	LegacyDir string `json:"legacy_dir"` // donde dejas los OCX de la PC vieja
@@ -43,19 +43,21 @@ type Config struct {
 // Default devuelve parámetros que replican prod CONTABILIDAD + dev Docker.
 func Default() Config {
 	return Config{
-		Env:       "dev",
-		DbMode:    DbDocker,
-		Server:    "localhost,14333",
-		Database:  "SIDC",
-		DsnName:   "SIDC_SQL",
-		Driver:    "ODBC Driver 17 for SQL Server",
+		Env:        "dev",
+		DbMode:     DbDocker,
+		Server:     "localhost,14333",
+		Database:   "SIDC",
+		DsnName:    "SIDC_SQL",
+		Driver:     "ODBC Driver 17 for SQL Server",
 		UseWinAuth: false,
-		SQLUser:   "dev",
-		Collation: "Modern_Spanish_CI_AS",
-		Compat:    120,
-		AppDir:    `C:\DEV\SIDC`,
-		DockerDir: `C:\DEV\SIDC\docker-dev`,
-		BackupDir: `C:\DEV\SIDC\AegisSetup\assets\backups\sqlserver2014`,
+		SQLUser:    "dev",
+		Collation:  "Modern_Spanish_CI_AS",
+		Compat:     120,
+		AppDir:     `C:\DEV\SIDC`,
+		DockerDir:  `C:\DEV\SIDC\docker-dev`,
+		// El respaldo vive en el árbol de máquina (F3): en una PC limpia no hay
+		// repo del que sacarlo. En dev se sigue encontrando por BackupDirs().
+		BackupDir: DirBackups(),
 		LegacyDir: `C:\DEV\SIDC\AegisSetup\assets\legacy\ocx`,
 	}
 }

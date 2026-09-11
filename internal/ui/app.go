@@ -309,7 +309,7 @@ func (m Model) startTask(k taskKind, name string) (tea.Model, tea.Cmd) {
 func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(string) string, emit func(string)) error {
 	switch k {
 	case taskSetupDB:
-		bak, err := setup.FindNewestBak(cfg.BackupDir)
+		bak, err := setup.FindNewestBakCfg(cfg)
 		if err != nil {
 			return err
 		}
