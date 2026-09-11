@@ -57,6 +57,7 @@ var (
 var comandosQueEscriben = map[string]bool{
 	"setup-db":  true,
 	"setup-app": true,
+	"uninstall": true,
 }
 
 // writesToSystem dice si un subcomando modifica la máquina (y por lo tanto necesita
@@ -125,6 +126,7 @@ Subcomandos:
              Sale con código 3 si algo traba la instalación, y 0 si no traba nada.
   bak        De dónde bajar el .bak de SIDC y en qué carpeta dejarlo (Aegis no lo baja).
              Sale con código 3 si todavía no hay respaldo.
+	uninstall  Saca lo que instaló Aegis (sin --yes solo muestra el plan, no borra).
   dashboard  Panel de estado no interactivo (para pegar en un correo de soporte).
   menu       Menú interactivo (0=instalación completa, 1=db, 2=app, 3=check, 4-6=presets).
   configure  Genera config.json inicial.`,
@@ -157,6 +159,9 @@ Subcomandos:
 	cmd.AddCommand(newBakCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}, setup.FindNewestBakCfg))
+	cmd.AddCommand(newUninstallCmd(func() (config.Config, string, error) {
+		return resolveCfg(exeDir, configPath, cfgLoader)
+	}))
 	cmd.AddCommand(newDashboardCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}))

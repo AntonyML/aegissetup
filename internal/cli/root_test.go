@@ -140,8 +140,8 @@ func stubAdmin(t *testing.T, admin, skip bool, code int, err error) *[]string {
 // máquina rota suele ser una donde no hay forma de aceptar un UAC (sesión remota,
 // otro usuario, un script).
 func TestSoloLosQueEscribenPidenElevacion(t *testing.T) {
-	escriben := map[string]bool{"setup-db": true, "setup-app": true}
-	for _, sub := range []string{"setup-db", "setup-app", "check", "checklist", "bak", "dashboard", "menu", "configure"} {
+	escriben := map[string]bool{"setup-db": true, "setup-app": true, "uninstall": true}
+	for _, sub := range []string{"setup-db", "setup-app", "check", "checklist", "bak", "uninstall", "dashboard", "menu", "configure"} {
 		if got, want := writesToSystem(sub), escriben[sub]; got != want {
 			t.Errorf("writesToSystem(%q) = %v, quiero %v", sub, got, want)
 		}
