@@ -7,48 +7,63 @@ PARA QUÉ
   2014). La app VB6 solo ve DSN de 32-bit, por eso el puerto
   14333 (no choca con un SQL local en 1433).
 
+DE DÓNDE SALEN ESTOS ARCHIVOS
+  docker-compose.yml, esta guía, .env.example y init\ viajan
+  adentro de aegis.exe. Aegis los deja en la carpeta docker_dir
+  de la PC cuando corres el paso 1 (o el perfil de pruebas):
+
+      C:\ProgramData\AegisSetup\docker
+
+  Ya no hace falta el repo del proyecto en la PC destino, y
+  tampoco copiar esta carpeta a mano. El .env NO viaja en el
+  EXE (tiene la clave del SA): se crea en la PC, ver paso 2.
+
 REQUISITOS
   Docker Desktop con plugin compose. El .bak ya debe estar en
-  assets\backups\sqlserver2014\ (ver su LEEME).
+  la carpeta de respaldos (ver el LEEME de la carpeta).
 
-PASO 1 · Configurar (una vez, desde la raíz del repo)
-    copy docker\.env.example docker\.env
-  Revisa docker\.env: SQL_COLLATION debe ser Modern_Spanish_CI_AS
+PASO 1 · Dejar el kit y configurar (una vez)
+    .\aegis.exe setup-db
+  Escribe el kit en C:\ProgramData\AegisSetup\docker y después
+  restaura el .bak. Si querés solo el kit, alcanza con el perfil
+  de pruebas del menú: los archivos quedan igual.
+
+PASO 2 · Crear el .env
+  En C:\ProgramData\AegisSetup\docker:
+      copy .env.example .env
+  Revisá .env: SQL_COLLATION debe ser Modern_Spanish_CI_AS
   (igual que prod). Solo se aplica al crear el contenedor la
-  primera vez.
+  primera vez. No subas .env a ningún lado.
 
-PASO 2 · Levantar
-    cd docker
+PASO 3 · Levantar
+    cd C:\ProgramData\AegisSetup\docker
     docker compose up -d
     docker logs sidc_sql2019 --tail 20
   Espera esta línea:
     "SQL Server is now ready for client connections".
 
-PASO 3 · Restaurar (con Aegis, recomendado)
-    cd ..
-    .\bin\aegis.exe setup-db
+PASO 4 · Restaurar (con Aegis, recomendado)
+    .\aegis.exe setup-db
   Hace solo: FILELISTONLY -> RESTORE ... WITH MOVE -> compat 120
   -> CHECKDB -> crea login app. Final esperado:
     OK: SIDC compat=120 collation=Modern_Spanish_CI_AS
-  (El flujo manual viejo con migrate.ps1 quedó jubilado en
-  scripts\legacy\.)
 
-PASO 4 · DSN de 32-bit (VB6 solo ve 32-bit)
+PASO 5 · DSN de 32-bit (VB6 solo ve 32-bit)
   Opción A (recomendada):
-    .\bin\aegis.exe setup-app --save-pwd --patch-docker   (SOLO dev/docker)
+    .\aegis.exe setup-app --save-pwd --patch-docker   (SOLO dev/docker)
   Opción B (manual): C:\Windows\SysWOW64\odbcad32.exe > System DSN >
     Name SIDC_SQL, Driver ODBC Driver 17, Server localhost,14333,
     SQL Auth con el login de config (default dev) y clave de
     AEGIS_SQL_PASSWORD, Default DB SIDC, Test SUCCESS.
 
-PASO 5 · Probar
-    .\bin\aegis.exe check
+PASO 6 · Probar
+    .\aegis.exe check
   Esperado: 5 OK (TCP, SQL compat=120, DSN, CRYSTAL, App ficheros).
-  Si CRYSTAL da FAIL, ve a assets\legacy\crystal\LEEME.txt.
 
-APAGAR / LIMPIAR (desde docker\)
-  docker compose down      (mantiene datos)
-  docker compose down -v   (borra todo; úsalo si cambias collation)
+APAGAR / LIMPIAR
+  cd C:\ProgramData\AegisSetup\docker
+    docker compose down      (mantiene datos)
+    docker compose down -v   (borra todo; úsalo si cambias collation)
 
 TRUCO PROD
   Para que el DSN cree que habla con prod, agrega al hosts

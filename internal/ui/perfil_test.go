@@ -26,6 +26,19 @@ func nuevoEnPrimeraVez(t *testing.T, cfg config.Config) (Model, string) {
 	return NewModel(cfg, path).SetPrimeraVez(true), path
 }
 
+// aplicarPerfilEn pulsa la tecla del perfil y contesta la carpeta de SIDC cuando el TUI
+// la pregunta: un perfil no se aplica hasta que esa carpeta está dicha, y en una PC sin
+// config.json nadie la dijo todavía.
+func aplicarPerfilEn(t *testing.T, m Model, key, dir string) Model {
+	t.Helper()
+	m = pulsar(m, key)
+	if m.screen == screenAppDir {
+		m.dirInput.SetValue(dir)
+		m = pulsar(m, "enter")
+	}
+	return m
+}
+
 // La primera pregunta en una PC sin config no es "¿qué querés hacer?" sino "¿en qué
 // PC estamos?". Antes el TUI abría el menú con el perfil dev/Docker por defecto y el
 // operador de FEMUCARIBE veía "Docker en marcha" en rojo antes de entender que eso
@@ -69,8 +82,8 @@ func TestConPerfilElegidoNoSePregunta(t *testing.T) {
 // Elegir "Pruebas" tiene que escribir el config, no solo cambiar la pantalla: el
 // operador que cierra el TUI y vuelve no quiere que le pregunten de nuevo.
 func TestPerfilPruebasGuardaLaConfig(t *testing.T) {
-	m, path := nuevoEnPrimeraVez(t, config.Default())
-	m = pulsar(m, "1")
+	m, path := nuevoEnPrimeraVez(t, devCfg())
+	m = aplicarPerfilEn(t, m, "1", `C:\SIDC`)
 
 	if m.taskErr != nil {
 		t.Fatalf("error inesperado: %v", m.taskErr)
@@ -94,8 +107,8 @@ func TestPerfilPruebasGuardaLaConfig(t *testing.T) {
 }
 
 func TestPerfilProdLocalGuardaLaConfig(t *testing.T) {
-	m, path := nuevoEnPrimeraVez(t, config.Default())
-	m = pulsar(m, "2")
+	m, path := nuevoEnPrimeraVez(t, devCfg())
+	m = aplicarPerfilEn(t, m, "2", `C:\SIDC`)
 
 	guardada, err := config.Load(path)
 	if err != nil {
@@ -114,7 +127,9 @@ func TestPerfilProdLocalGuardaLaConfig(t *testing.T) {
 // manda al operador a un "motor no alcanzable en CONTABILIDAD" que no tiene nada
 // que ver con su problema. Se pregunta.
 func TestPerfilProdServerPideElNombre(t *testing.T) {
-	m, path := nuevoEnPrimeraVez(t, config.Default())
+	cfg := devCfg()
+	cfg.AppDir = ""
+	m, path := nuevoEnPrimeraVez(t, cfg)
 	m = pulsar(m, "3")
 
 	if m.screen != screenServer {
@@ -124,7 +139,13 @@ func TestPerfilProdServerPideElNombre(t *testing.T) {
 		t.Error("el campo no sugiere ningún nombre: el operador no sabe si tipea PC, IP o instancia")
 	}
 
+	// Con el nombre contestado todavía falta la carpeta de SIDC: son dos preguntas y
+	// ninguna de las dos se puede adivinar.
 	m = escribir(m, "SIDC01")
+	if m.screen != screenAppDir {
+		t.Fatalf("pantalla = %v, quiero screenAppDir (después del servidor viene la carpeta)", m.screen)
+	}
+	m = escribir(m, `D:\SIDC`)
 	if m.taskErr != nil {
 		t.Fatalf("error inesperado: %v", m.taskErr)
 	}
@@ -164,13 +185,17 @@ func TestPerfilProdServerNoAceptaVacio(t *testing.T) {
 // Con --server no se pregunta: es el camino no interactivo (scripts, instalación
 // desatendida) y ahí nadie puede tipear.
 func TestPerfilProdServerConFlagNoPregunta(t *testing.T) {
-	m, path := nuevoEnPrimeraVez(t, config.Default())
+	m, path := nuevoEnPrimeraVez(t, devCfg())
 	m = m.SetPresetServer("MI_SERVIDOR")
 	m = pulsar(m, "3")
 
 	if m.screen == screenServer {
 		t.Fatal("preguntó el servidor teniendo --server")
 	}
+	if m.screen != screenAppDir {
+		t.Fatalf("pantalla = %v, quiero screenAppDir: --server no dice dónde está SIDC", m.screen)
+	}
+	m = pulsar(m, "enter") // la carpeta todavía no está contestada
 	guardada, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)
@@ -184,10 +209,16 @@ func TestPerfilProdServerConFlagNoPregunta(t *testing.T) {
 // contra el perfil anterior, ya no describe esta máquina. Si no se limpia, el
 // operador queda trabado por requisitos de un ambiente que acaba de abandonar.
 func TestElegirPerfilDescartaElChecklistViejo(t *testing.T) {
-	m, _ := nuevoEnPrimeraVez(t, config.Default())
+	m, _ := nuevoEnPrimeraVez(t, devCfg())
 	m.checks = []precheck.Requisito{}
 
-	out, cmd := m.Update(tecla("2"))
+	out, _ := m.Update(tecla("2"))
+	m = out.(Model)
+	if m.screen != screenAppDir {
+		t.Fatalf("pantalla = %v, quiero screenAppDir", m.screen)
+	}
+	m.dirInput.SetValue(`C:\SIDC`)
+	out, cmd := m.Update(tecla("enter"))
 	m = out.(Model)
 	if cmd == nil {
 		t.Fatal("no pidió recalcular el checklist")
@@ -208,7 +239,13 @@ func TestCambiarDePerfilDesdeElMenuTambienRecalcula(t *testing.T) {
 	m.checks = []precheck.Requisito{}
 	m.verificando = false
 
-	out, cmd := m.Update(tecla("4")) // preset dev
+	out, _ := m.Update(tecla("4")) // preset dev
+	m = out.(Model)
+	if m.screen != screenAppDir {
+		t.Fatalf("pantalla = %v, quiero screenAppDir (la carpeta es dato de esta PC)", m.screen)
+	}
+	m.dirInput.SetValue(`C:\SIDC`)
+	out, cmd := m.Update(tecla("enter"))
 	m = out.(Model)
 	if cmd == nil {
 		t.Fatal("el preset no pidió recalcular el checklist")
@@ -257,8 +294,8 @@ func TestLosPerfilesSonLosPresetsDelMenu(t *testing.T) {
 
 // Después de elegir, el operador tiene que saber dónde quedó el config y qué sigue.
 func TestAvisaDondeQuedoElConfig(t *testing.T) {
-	m, path := nuevoEnPrimeraVez(t, config.Default())
-	m = pulsar(m, "2")
+	m, path := nuevoEnPrimeraVez(t, devCfg())
+	m = aplicarPerfilEn(t, m, "2", `C:\SIDC`)
 
 	if m.screen != screenDone {
 		t.Fatalf("pantalla = %v, quiero la confirmación", m.screen)
@@ -309,13 +346,12 @@ func TestTeclasDeLosPerfilesAplicanSuPerfil(t *testing.T) {
 		if p.action == actPresetProdServer {
 			continue // pregunta el nombre; el mapeo se prueba con el flag --server
 		}
-		quiero, err := presetConfig(config.Default(), p.action, "")
+		quiero, err := presetConfig(config.Default(), p.action, "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		m, _ := nuevoEnPrimeraVez(t, config.Default())
-		out, _ := m.Update(tecla(p.key))
-		got := out.(Model)
+		m, _ := nuevoEnPrimeraVez(t, devCfg())
+		got := aplicarPerfilEn(t, m, p.key, `C:\SIDC`)
 		if got.cfg.Env != quiero.Env || got.cfg.DbMode != quiero.DbMode || got.cfg.Server != quiero.Server {
 			t.Errorf("tecla %q -> %s/%s/%s, quiero %s/%s/%s", p.key,
 				got.cfg.Env, got.cfg.DbMode, got.cfg.Server, quiero.Env, quiero.DbMode, quiero.Server)
@@ -325,11 +361,15 @@ func TestTeclasDeLosPerfilesAplicanSuPerfil(t *testing.T) {
 		}
 	}
 
-	m, _ := nuevoEnPrimeraVez(t, config.Default())
-	m = m.SetPresetServer("MI_SERVIDOR")
+	m, _ := nuevoEnPrimeraVez(t, devCfg())
+	m = m.SetPresetServer("MI_SERVIDOR").SetPresetAppDir(`C:\SIDC`)
 	out, _ := m.Update(tecla("3"))
-	if got := out.(Model); got.cfg.Server != "MI_SERVIDOR" {
+	got := out.(Model)
+	if got.cfg.Server != "MI_SERVIDOR" {
 		t.Errorf("tecla 3 con --server -> %q, quiero MI_SERVIDOR", got.cfg.Server)
+	}
+	if got.screen == screenServer || got.screen == screenAppDir {
+		t.Errorf("pantalla = %v, con los dos flags no queda nada que preguntar", got.screen)
 	}
 }
 
@@ -344,7 +384,7 @@ func TestSiFallaElGuardadoNoSigueAlMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := NewModel(devCfg(), imposible).SetPrimeraVez(true)
-	m = pulsar(m, "2")
+	m = aplicarPerfilEn(t, m, "2", `C:\SIDC`)
 
 	if m.screen != screenDone || m.taskErr == nil {
 		t.Fatalf("pantalla=%v err=%v, quiero la falla a la vista", m.screen, m.taskErr)

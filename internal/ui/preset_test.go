@@ -11,7 +11,7 @@ import (
 // El flag --server del CLI solo cambia el preset "prod server": deja elegir el
 // servidor sin editar config.json a mano.
 func TestPresetProdServerConFlagUsaEseServer(t *testing.T) {
-	cfg, err := presetConfig(devCfg(), actPresetProdServer, "MI_SERVIDOR")
+	cfg, err := presetConfig(devCfg(), actPresetProdServer, "MI_SERVIDOR", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestPresetProdServerConFlagUsaEseServer(t *testing.T) {
 // viene de dev (localhost), salta a CONTABILIDAD; si ya trae un server remoto,
 // lo respeta.
 func TestPresetProdServerSinFlag(t *testing.T) {
-	cfg, err := presetConfig(devCfg(), actPresetProdServer, "")
+	cfg, err := presetConfig(devCfg(), actPresetProdServer, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestPresetProdServerSinFlag(t *testing.T) {
 	remota := prodCfg()
 	remota.DbMode = config.DbServer
 	remota.Server = "OTRO_SERVIDOR"
-	cfg2, err := presetConfig(remota, actPresetProdServer, "")
+	cfg2, err := presetConfig(remota, actPresetProdServer, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestPresetProdServerSinFlag(t *testing.T) {
 
 // Los otros presets no se tocan por el flag: dev y prod local siguen fijos.
 func TestPresetDevYProdLocalInmutables(t *testing.T) {
-	dev, err := presetConfig(prodCfg(), actPresetDev, "IGNORADO")
+	dev, err := presetConfig(prodCfg(), actPresetDev, "IGNORADO", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestPresetDevYProdLocalInmutables(t *testing.T) {
 		t.Errorf("dev auth/driver = %v/%s, quiero SQL Auth + ODBC 17", dev.UseWinAuth, dev.Driver)
 	}
 
-	local, err := presetConfig(devCfg(), actPresetProdLocal, "IGNORADO")
+	local, err := presetConfig(devCfg(), actPresetProdLocal, "IGNORADO", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestSetPresetServer(t *testing.T) {
 // config nueva, no la vieja.
 func TestTecla6ConServerGuardaYActualiza(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	m := NewModel(devCfg(), path).SetPresetServer("MI_SERVIDOR")
+	m := NewModel(devCfg(), path).SetPresetServer("MI_SERVIDOR").SetPresetAppDir(`C:\SIDC`)
 
 	m = pulsar(m, "6")
 	if m.screen != screenDone {

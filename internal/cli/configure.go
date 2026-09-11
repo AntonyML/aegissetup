@@ -10,7 +10,7 @@ import (
 )
 
 func newConfigureCmd(_ string) *cobra.Command {
-	var env, dbMode, server, out string
+	var env, dbMode, server, appDir, out string
 	cmd := &cobra.Command{
 		Use:   "configure",
 		Short: "Genera config.json inicial (dev docker / prod local|docker|server)",
@@ -33,6 +33,9 @@ func newConfigureCmd(_ string) *cobra.Command {
 			if server != "" {
 				cfg.Server = server
 			}
+			if appDir != "" {
+				cfg.AppDir = appDir
+			}
 			if cfg.Env == "prod" && (cfg.DbMode == config.DbLocal || cfg.DbMode == config.DbServer) {
 				cfg.UseWinAuth = true
 				cfg.Driver = "SQL Server"
@@ -50,13 +53,21 @@ func newConfigureCmd(_ string) *cobra.Command {
 			if err := cfg.Save(path); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "config escrita en %s (env=%s db_mode=%s server=%s)\n", path, cfg.Env, cfg.DbMode, cfg.Server)
+			// El kit de Docker es parte del modo docker, no del paso 1: si se deja recién ahí,
+			// el arreglo que el checklist da para levantar el motor apunta a un archivo que
+			// todavía no existe. Se deja acá y también en el paso 1 (config editada a mano).
+			out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
+			for _, f := range InstalarCompose(cfg.DbMode, out) {
+				out("DOCKER PENDIENTE: " + f)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "config escrita en %s (env=%s db_mode=%s server=%s app_dir=%s)\n", path, cfg.Env, cfg.DbMode, cfg.Server, cfg.AppDir)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&env, "env", "", "dev|prod")
 	cmd.Flags().StringVar(&dbMode, "db-mode", "", "docker|local|server")
 	cmd.Flags().StringVar(&server, "server", "", "ej localhost,14333 | localhost | CONTABILIDAD | MI_SERVIDOR")
+	cmd.Flags().StringVar(&appDir, "app-dir", "", "carpeta donde está SIDC en esta PC (ej. C:\\SIDC); vacío = el TUI la pregunta")
 	cmd.Flags().StringVar(&out, "out", "", "ruta de salida (default: %APPDATA%\\AegisSetup\\config.json)")
 	return cmd
 }

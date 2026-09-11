@@ -127,3 +127,33 @@ func TestCrystalFSEsPlanoYCompleto(t *testing.T) {
 		t.Errorf("el runtime tiene %d archivos, se esperan >= 40", n)
 	}
 }
+
+// ocxRequeridos y ocxSoporte son el contrato del embed con el instalador: los 22
+// archivos que InstallOCX necesita encontrar adentro, con el mismo nombre que usa
+// Setup App. Si alguien renombra un archivo en assets/legacy/ocx, el EXE compila
+// igual y el control falta recién en la PC.
+var ocxRequeridos = []string{
+	"MSCOMCT2.OCX", "MSCOMCTL.OCX", "MSFLXGRD.OCX", "MSMASK32.OCX",
+	"TABCTL32.OCX", "RICHTX32.OCX", "MSDATGRD.OCX", "MSADODC.OCX",
+	"MSSTDFMT.DLL", "MSBIND.DLL", "MSDBRPTR.DLL",
+}
+
+var ocxSoporte = []string{
+	"RCHTXES.DLL", "MSMSKES.DLL", "TABCTES.DLL", "FLXGDES.DLL",
+	"MSCC2ES.DLL", "MSCMCES.DLL", "STDFTES.DLL", "DATGDES.DLL",
+	"VB5DB.DLL", "DBRPRES.DLL", "ADODCES.DLL",
+}
+
+// OCX() es la puerta del instalador a los controles: en una PC limpia no hay carpeta
+// de la PC vieja, así que los 22 archivos tienen que salir del binario.
+func TestOCXTraeTodosLosControlesConLaRaizPlana(t *testing.T) {
+	fsys := OCX()
+	for _, f := range append(append([]string{}, ocxRequeridos...), ocxSoporte...) {
+		if _, err := fs.Stat(fsys, f); err != nil {
+			t.Errorf("falta %s en la raíz de los OCX embebidos: %v", f, err)
+		}
+	}
+	if _, err := fs.Stat(fsys, "legacy"); err == nil {
+		t.Error("la raíz todavía tiene legacy/: Setup App copiaría una carpeta a SysWOW64")
+	}
+}

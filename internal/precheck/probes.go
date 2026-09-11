@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"aegis-setup/assets"
 	"aegis-setup/internal/config"
 	"aegis-setup/internal/setup"
 
@@ -31,9 +32,13 @@ func SondasReales() Sondas {
 		DSN:     dsnPresente,
 		Crystal: setup.CheckCrystal,
 		OCX: func(cfg config.Config) EstadoOCX {
+			// Los controles viajan dentro del propio binario, así que "no hay de dónde
+			// copiarlos" pasó a ser un caso de emergencia: un EXE mal armado, sin el
+			// kit embebido.
+			origen := setup.OrigenOCX{Binario: assets.OCX(), Carpeta: cfg.LegacyDir}
 			return EstadoOCX{
 				FaltanEnSysWOW64: setup.CheckOCX(),
-				FaltanEnOrigen:   setup.FaltanOCXEn(cfg.LegacyDir),
+				FaltanEnOrigen:   setup.FaltanOCXEn(origen),
 			}
 		},
 		Backup:   setup.FindNewestBakCfg,

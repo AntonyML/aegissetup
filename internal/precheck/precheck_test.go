@@ -326,6 +326,30 @@ func TestArregloDelMotorCambiaPorAmbiente(t *testing.T) {
 	}
 }
 
+// El arreglo del motor de pruebas tiene que nombrar el compose que ESTA PC tiene: el paso 1
+// lo deja en docker_dir. Antes decía "docker/docker-compose.yml", que es la ruta del repo y en
+// la PC destino no existe, así que el operador copiaba un comando que no podía correr.
+func TestElArregloDelMotorNombraElComposeInstalado(t *testing.T) {
+	s := sondasOK()
+	s.Motor = motor(EstadoFalta, "connection refused")
+
+	dev := config.Default() // docker
+	dev.DockerDir = `C:\ProgramData\AegisSetup\docker`
+	got := buscar(t, Run(dev, "", s), ReqMotor).Arreglo
+
+	if !strings.Contains(got, `C:\ProgramData\AegisSetup\docker\docker-compose.yml`) {
+		t.Errorf("el arreglo no dice dónde está el compose de esta PC, dice: %s", got)
+	}
+	if strings.Contains(got, "-f docker/docker-compose.yml") {
+		t.Errorf("el arreglo sigue mandando a la carpeta del repo, dice: %s", got)
+	}
+	// Ese archivo lo deja Aegis al correr el paso 1: si el arreglo no lo dice, un archivo que
+	// todavía no está se lee como una instalación rota.
+	if !strings.Contains(got, "Setup DB") {
+		t.Errorf("el arreglo no aclara de dónde sale el compose, dice: %s", got)
+	}
+}
+
 func TestOCXNuncaBloquea(t *testing.T) {
 	// Los OCX son la única falta que se arregla desde el propio menú. Si
 	// bloquearan Setup App, el operador no tendría ninguna acción para salir
@@ -343,9 +367,11 @@ func TestOCXNuncaBloquea(t *testing.T) {
 			prohibe: "PC vieja",
 		},
 		{
-			nombre:  "no hay de dónde copiarlos",
+			// El kit viaja dentro del binario: este caso es un EXE mal armado, no una PC
+			// sin la carpeta de la PC vieja. El arreglo tiene que apuntar al binario.
+			nombre:  "el binario no trae el kit",
 			origen:  []string{"MSCOMCTL.OCX"},
-			espera:  "PC vieja",
+			espera:  "compilación vieja",
 			prohibe: "Se resuelve solo",
 		},
 	}
@@ -429,4 +455,63 @@ func TestMarcaPorEstado(t *testing.T) {
 // pudo verificar) y casi todos los tests solo necesitan decir "anda" o "no anda".
 func motor(e Estado, detalle string) func(string) (Estado, string) {
 	return func(string) (Estado, string) { return e, detalle }
+}
+
+// Con app_dir sin configurar, el requisito tiene que pedir la carpeta. Un título que
+// diga "Archivos de SIDC en " y un arreglo que mande a copiar a una carpeta vacía dejan
+// al operador sin saber qué hacer: la carpeta de SIDC la tiene que decir él.
+func TestAppDirVacioPideLaCarpeta(t *testing.T) {
+	cfg := config.Default()
+	cfg.AppDir = ""
+	// La sonda real devuelve "app_dir sin configurar" cuando la ruta está vacía.
+	s := sondasOK()
+	s.AppFiles = func(dir string) []string {
+		if dir == "" {
+			return []string{"app_dir sin configurar"}
+		}
+		return nil
+	}
+
+	r := buscar(t, Run(cfg, "", s), ReqApp)
+	if r.Estado == EstadoOK {
+		t.Fatal("sin app_dir no puede estar OK")
+	}
+	if !strings.Contains(r.Titulo, "sin configurar") {
+		t.Errorf("el título tiene que decir que falta configurar la carpeta, dice: %s", r.Titulo)
+	}
+	for _, quiero := range []string{"--app-dir", "perfil"} {
+		if !strings.Contains(r.Arreglo, quiero) {
+			t.Errorf("el arreglo tiene que nombrar %q, dice: %s", quiero, r.Arreglo)
+		}
+	}
+	// app_dir vacío traba Setup App: sin los archivos de SIDC no hay qué configurar.
+	var trabaSetupApp bool
+	for _, id := range BloqueantesDe(EtapaSetupApp) {
+		if id == ReqApp {
+			trabaSetupApp = true
+		}
+	}
+	if !trabaSetupApp {
+		t.Error("app_dir sin configurar tiene que trabar Setup App, no solo avisar")
+	}
+}
+
+// Con app_dir configurado, el requisito nombra la carpeta real: es la única forma de que
+// el operador vea que Aegis está midiendo la carpeta que él quiso.
+func TestAppDirConfiguradoNombraLaCarpeta(t *testing.T) {
+	cfg := config.Default()
+	cfg.AppDir = `D:\SIDC`
+	s := sondasOK()
+	s.AppFiles = func(dir string) []string { return []string{"exe: " + dir + `\falta.exe`} }
+
+	r := buscar(t, Run(cfg, "", s), ReqApp)
+	if !strings.Contains(r.Titulo, `D:\SIDC`) {
+		t.Errorf("el título tiene que nombrar la carpeta, dice: %s", r.Titulo)
+	}
+	if !strings.Contains(r.Detalle, `D:\SIDC`) {
+		t.Errorf("el detalle tiene que mostrar qué falta en la carpeta, dice: %s", r.Detalle)
+	}
+	if !strings.Contains(r.Arreglo, `D:\SIDC`) {
+		t.Errorf("el arreglo tiene que decir a dónde copiar, dice: %s", r.Arreglo)
+	}
 }

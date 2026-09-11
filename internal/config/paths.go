@@ -45,6 +45,13 @@ func DirBackups() string {
 	return filepath.Join(DirAssets(), "backups", subBackups)
 }
 
+// DirDocker devuelve C:\ProgramData\AegisSetup\docker, donde Aegis deja el compose del
+// SQL de pruebas. Va acá y no en la carpeta del proyecto porque en la PC destino no hay
+// proyecto: el compose viaja dentro del EXE y se extrae antes de levantarlo.
+func DirDocker() string {
+	return filepath.Join(DirProgramData(), "docker")
+}
+
 // DirConfig devuelve %APPDATA%\AegisSetup.
 func DirConfig() string {
 	return filepath.Join(baseAppData(), nombreProducto)

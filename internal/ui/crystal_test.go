@@ -92,7 +92,16 @@ func stubCrystal(t *testing.T, origen fs.FS, destino string, orden ...*[]string)
 	fsPrevio, dirPrevio, regPrevio := crystalFS, crystalDir, registrarCOM
 	registrados := &[]string{}
 	crystalFS, crystalDir = origen, destino
+	// Igual que el stub de los OCX: el regsvr32 de 32 bits es el mismo para los dos
+	// instaladores, así que cada uno reconoce lo suyo por la carpeta de destino y el
+	// orden en que se llamen los stubs no cambia el resultado.
 	registrarCOM = func(ruta string) error {
+		if !strings.HasPrefix(ruta, destino) {
+			if regPrevio != nil {
+				return regPrevio(ruta)
+			}
+			return nil
+		}
 		*registrados = append(*registrados, ruta)
 		if ordenPtr != nil {
 			*ordenPtr = append(*ordenPtr, "crystal")
@@ -108,6 +117,7 @@ func stubCrystal(t *testing.T, origen fs.FS, destino string, orden ...*[]string)
 func TestSetupAppInstalaElRuntimeDeCrystal(t *testing.T) {
 	destino := t.TempDir()
 	registrados := stubCrystal(t, runtimeDeMentira(), destino)
+	stubOCX(t, kitDeMentira(), t.TempDir())
 	stubDSN(t, nil)
 
 	cfg := prodCfg()
@@ -131,6 +141,7 @@ func TestSetupAppInstalaElRuntimeDeCrystal(t *testing.T) {
 // _DOCKER tiene que ver un DSN ya escrito.
 func TestElRuntimeSeInstalaDespuesDeLosOCXYAntesDelParche(t *testing.T) {
 	var orden []string
+	stubOCX(t, kitDeMentira(), t.TempDir(), &orden)
 	stubCrystal(t, runtimeDeMentira(), t.TempDir(), &orden)
 	stubDSN(t, &orden)
 	stubParche(t, &orden)
@@ -144,9 +155,33 @@ func TestElRuntimeSeInstalaDespuesDeLosOCXYAntesDelParche(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup App falló: %v", err)
 	}
-	if len(orden) != 3 || orden[0] != "dsn" || orden[1] != "crystal" || orden[2] != "parche" {
-		t.Errorf("orden de los pasos = %v, quiero [dsn crystal parche]", orden)
+	if got := sinRepetir(orden); !iguales(got, []string{"dsn", "ocx", "crystal", "parche"}) {
+		t.Errorf("orden de los pasos = %v, quiero [dsn ocx crystal parche]", got)
 	}
+}
+
+// sinRepetir deja el primer paso de cada tramo: los 11 controles y los 4 componentes se
+// registran de a uno, así que el orden real llega con el mismo paso repetido.
+func sinRepetir(xs []string) []string {
+	var out []string
+	for i, x := range xs {
+		if i == 0 || xs[i-1] != x {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+func iguales(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // stubDSN evita que la prueba escriba el DSN en el registro de la máquina.

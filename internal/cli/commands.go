@@ -33,13 +33,23 @@ func newSetupDbCmd(res func() (config.Config, string, error)) *cobra.Command {
 				appPass = os.Getenv("AEGIS_SQL_PASSWORD")
 			}
 			out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
-			return setup.SetupDB(context.Background(), cfg, bak, saPass, appPass, out)
+			return ejecutarSetupDB(cfg, bak, saPass, appPass, out)
 		},
 	}
 	cmd.Flags().StringVar(&bak, "bak", "", ".bak a restaurar (default: el más nuevo de backup_dir)")
 	cmd.Flags().StringVar(&saPass, "sa-password", "", "clave SA (o env AEGIS_SA_PASSWORD; vacío = Windows Auth)")
 	cmd.Flags().StringVar(&appPass, "app-password", "", "clave del login app SQL Auth (o env AEGIS_SQL_PASSWORD)")
 	return cmd
+}
+
+// ejecutarSetupDB es el paso 1 completo: deja el kit de Docker en la PC (solo db_mode=docker)
+// y restaura el .bak. Está aparte del RunE para poder probar el orden de esos dos pasos sin
+// abrir la terminal ni restaurar una base de verdad.
+func ejecutarSetupDB(cfg config.Config, bak, saPass, appPass string, out func(string)) error {
+	for _, f := range InstalarCompose(cfg.DbMode, out) {
+		out("DOCKER PENDIENTE: " + f)
+	}
+	return setup.SetupDB(context.Background(), cfg, bak, saPass, appPass, out)
 }
 
 func newSetupAppCmd(res func() (config.Config, string, error)) *cobra.Command {
@@ -82,7 +92,9 @@ func ejecutarSetupApp(cfg config.Config, o setupAppOpts, out func(string)) error
 	if err := escribirDSN(cfg, o.appPass, o.savePWD, out); err != nil {
 		return err
 	}
-	for _, f := range setup.InstallOCX(cfg.LegacyDir, out) {
+	// Los controles de VB6 salen del propio binario: en una PC limpia no hay carpeta
+	// de la PC vieja de dónde copiarlos.
+	for _, f := range InstalarOCX(cfg.LegacyDir, out) {
 		out("OCX PENDIENTE: " + f)
 	}
 	// El runtime de Crystal sale del propio binario: en una PC limpia no hay carpeta de
@@ -243,6 +255,13 @@ func newDashboardCmd(res func() (config.Config, string, error)) *cobra.Command {
 			fmt.Fprintln(w, "== AEGIS DASHBOARD ==")
 			fmt.Fprintf(w, "config: %s  env=%s db_mode=%s\n", path, cfg.Env, cfg.DbMode)
 			fmt.Fprintf(w, "server=%s database=%s dsn=%s driver=%s winAuth=%v\n", cfg.Server, cfg.Database, cfg.DsnName, cfg.Driver, cfg.UseWinAuth)
+			// app_dir va vacío hasta que alguien diga dónde está SIDC; decirlo explícito
+			// evita que un soporte lea "App OK" y crea que se midió la carpeta correcta.
+			appDir := cfg.AppDir
+			if appDir == "" {
+				appDir = "(sin configurar)"
+			}
+			fmt.Fprintf(w, "app_dir=%s\n", appDir)
 			for _, r := range check.Run(context.Background(), cfg, appPass) {
 				mark := "OK  "
 				if !r.OK {
@@ -257,13 +276,13 @@ func newDashboardCmd(res func() (config.Config, string, error)) *cobra.Command {
 	return cmd
 }
 
-func newMenuCmd(res func() (config.Config, string, error), presetServer func() string) *cobra.Command {
+func newMenuCmd(res func() (config.Config, string, error), opciones func() opcionesTUI) *cobra.Command {
 	return &cobra.Command{
 		Use:   "menu",
 		Short: "Menú interactivo (0=instalación completa 1=db 2=app 3=check 4-6=presets)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, path, err := res()
-			return runMenu(cmd, cfg, path, err, presetServer())
+			return runMenu(cmd, cfg, path, err, opciones())
 		},
 	}
 }

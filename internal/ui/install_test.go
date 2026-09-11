@@ -10,10 +10,13 @@ import (
 )
 
 // devCfg es el preset dev/docker: SQL Auth, así que las dos claves se piden.
+// devCfg es dev con la config ya contestada: app_dir puesto (como en una PC que ya pasó
+// por el perfil) para que los tests que no son sobre la carpeta no se detengan ahí.
 func devCfg() config.Config {
 	cfg := config.Default()
 	cfg.Env, cfg.DbMode, cfg.Server = "dev", config.DbDocker, "localhost,14333"
 	cfg.UseWinAuth, cfg.SQLUser = false, "dev"
+	cfg.AppDir = `C:\SIDC`
 	return cfg
 }
 
@@ -22,6 +25,7 @@ func prodCfg() config.Config {
 	cfg := config.Default()
 	cfg.Env, cfg.DbMode, cfg.Server = "prod", config.DbLocal, "localhost"
 	cfg.UseWinAuth = true
+	cfg.AppDir = `C:\SIDC`
 	return cfg
 }
 

@@ -3,6 +3,7 @@ package setup
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,13 +53,73 @@ func CheckOCX() []string {
 	return checkOCXSys()
 }
 
-// FaltanOCXEn reporta qué RequiredOCX no están en dir, el origen desde donde
-// Setup App los copia a SysWOW64. Sirve para distinguir "falta registrarlos"
-// (se arregla solo) de "no hay de dónde copiarlos" (hay que traerlos).
-func FaltanOCXEn(dir string) []string {
+// OrigenOCX dice de dónde salen los controles que Setup App instala.
+//
+// Existe un origen y no dos parámetros sueltos porque la precedencia es una regla, no
+// un detalle: los dos orígenes juntos deciden si un control se puede instalar, y esa
+// pregunta la hace el checklist antes de intentar nada.
+type OrigenOCX struct {
+	// Binario es el kit embebido en el ejecutable. Es el origen normal: en una PC
+	// limpia no existe la carpeta de la PC vieja, así que un instalador que solo
+	// lea de disco obliga a copiar 22 archivos a mano, que es exactamente el
+	// requisito externo que F7 elimina.
+	Binario fs.FS
+	// Carpeta es un origen extra en disco, para el control que no venga en el
+	// binario (kit incompleto, o un control más nuevo en la PC vieja).
+	//
+	// Lo que ya viaja adentro gana: un archivo suelto y viejo en disco no puede
+	// degradar una instalación que ya es autocontenida.
+	Carpeta string
+}
+
+// archivoDe busca un archivo en los orígenes y devuelve el FS y el nombre real con el
+// que hay que abrirlo. En el binario la búsqueda es sin distinguir mayúsculas: el embed
+// de Go es sensible (los nombres salen de la PC de producción y no son prolijos) y en
+// Windows el archivo destino no lo es, así que respetar el caso del origen evitaría que
+// algo copiado antes a mano se comparara bien.
+func (o OrigenOCX) archivoDe(indice map[string]string, nombre string) (fs.FS, string, bool) {
+	if real, ok := indice[strings.ToLower(nombre)]; ok {
+		return o.Binario, real, true
+	}
+	if o.Carpeta == "" {
+		return nil, "", false
+	}
+	disco := os.DirFS(o.Carpeta)
+	if _, err := fs.Stat(disco, nombre); err != nil {
+		return nil, "", false
+	}
+	return disco, nombre, true
+}
+
+// indiceOCX mapea nombre en minúsculas -> nombre real dentro del kit embebido. Un
+// binario sin el kit devuelve un índice vacío y no un error: el diagnóstico posterior
+// ("falta en SysWOW64 y no hay de dónde copiarlo") es más útil que una falla de arranque.
+func indiceOCX(src fs.FS) map[string]string {
+	indice := map[string]string{}
+	if src == nil {
+		return indice
+	}
+	err := fs.WalkDir(src, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		indice[strings.ToLower(p)] = p
+		return nil
+	})
+	if err != nil {
+		return map[string]string{}
+	}
+	return indice
+}
+
+// FaltanOCXEn reporta qué RequiredOCX no están en ningún origen desde donde Setup App
+// los copia a SysWOW64. Sirve para distinguir "falta registrarlos" (se arregla solo) de
+// "no hay de dónde copiarlos" (hay que conseguirlos).
+func FaltanOCXEn(o OrigenOCX) []string {
+	indice := indiceOCX(o.Binario)
 	var faltan []string
 	for _, f := range RequiredOCX {
-		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+		if _, _, ok := o.archivoDe(indice, f); !ok {
 			faltan = append(faltan, f)
 		}
 	}
@@ -67,6 +128,12 @@ func FaltanOCXEn(dir string) []string {
 
 // CheckAppFiles verifica exe, reportes, fotos. No modifica nada.
 func CheckAppFiles(appDir string) []string {
+	// Sin app_dir no hay nada que medir, y medir "" daría rutas relativas al
+	// directorio de trabajo del proceso: diría FALTA con una ruta que no existe en
+	// ningún lado. El mensaje tiene que decir la causa, que es otra.
+	if appDir == "" {
+		return []string{"app_dir sin configurar (elegí perfil o pasá --app-dir)"}
+	}
 	var missing []string
 	exe := filepath.Join(appDir, "Sistema Intergrado de Controles y Presupuesto.exe")
 	if _, err := os.Stat(exe); err != nil {
@@ -93,47 +160,86 @@ func CheckAppFiles(appDir string) []string {
 	return missing
 }
 
-// InstallOCX registra los OCX de legacyDir en SysWOW64 con regsvr32 de 32-bit.
-// Solo Windows. Devuelve lista de los que fallaron.
-func InstallOCX(legacyDir string, out func(string)) []string {
-	var failed []string
+// InstallOCX copia los controles a dir y registra los requeridos, con el regsvr32 de
+// 32 bits. Solo Windows. Devuelve la lista de los que fallaron.
+//
+// La presencia del archivo no se mira con un Stat: se compara el contenido. Un OCX
+// viejo en SysWOW64 con el nombre correcto es el caso peor de todos, porque el checklist
+// lo da por bueno y el error 339 aparece al abrir una pantalla puntual, lejos de la
+// instalación (misma razón que en InstallCrystal).
+//
+// Registrar, en cambio, se hace SIEMPRE. Que el archivo esté no prueba que esté
+// registrado, y regsvr32 es idempotente (~200 ms por control).
+//
+// Un archivo que no se puede escribir no aborta el resto: se acumula y sigue, así el
+// operador ve de una sola vez todo lo que falta.
+func InstallOCX(o OrigenOCX, dir string, registrar func(string) error, out func(string)) []string {
+	if registrar == nil {
+		registrar = func(string) error { return nil }
+	}
+	if out == nil {
+		out = func(string) {}
+	}
+	indice := indiceOCX(o.Binario)
+
+	var fallos []string
 	for _, f := range RequiredOCX {
-		src := filepath.Join(legacyDir, f)
-		if _, err := os.Stat(src); err != nil {
-			failed = append(failed, f+" (falta en "+legacyDir+", cópialo de la PC vieja)")
+		src, nombre, ok := o.archivoDe(indice, f)
+		if !ok {
+			fallos = append(fallos, f+" (no está en el binario"+o.colaDeCarpeta()+": traelo de la PC vieja)")
 			continue
 		}
-		dst := filepath.Join(SysWOW64, f)
-		if _, err := os.Stat(dst); err != nil {
-			if cpErr := copyFile(src, dst); cpErr != nil {
-				failed = append(failed, f+" (no se pudo copiar a SysWOW64, corre como Admin: "+cpErr.Error()+")")
+		dst := filepath.Join(dir, f)
+		copiado := false
+		if !iguales(src, nombre, dst) {
+			if err := extraer(src, nombre, dst); err != nil {
+				fallos = append(fallos, f+" (no se pudo copiar a "+dir+", corré como Admin: "+err.Error()+")")
 				continue
 			}
+			copiado = true
 		}
 		// Mismo registrar que los componentes de Crystal: quién es el regsvr32
 		// correcto (el de 32 bits) se decide en un solo lugar.
-		if err := RegisterCOM(dst); err != nil {
-			failed = append(failed, f+" (regsvr32 falló: "+err.Error()+")")
+		if err := registrar(dst); err != nil {
+			fallos = append(fallos, f+" (regsvr32 falló: "+err.Error()+")")
 			continue
 		}
-		out("OCX OK: " + f)
+		// Se informa siempre porque registrar siempre: "ya estaba" responde la
+		// pregunta que se hace el operador al repetir una instalación ("¿hizo algo?")
+		// y distingue el archivo que quedó de una corrida anterior del que se acaba
+		// de copiar. Los de soporte no se registran y solo se nombran al copiar: en
+		// una instalación repetida el silencio es la buena noticia.
+		if copiado {
+			out("OCX OK: " + f)
+		} else {
+			out("OCX YA ESTABA: " + f)
+		}
 	}
 	for _, f := range SupportFiles {
-		src := filepath.Join(legacyDir, f)
-		if _, err := os.Stat(src); err != nil {
+		src, nombre, ok := o.archivoDe(indice, f)
+		if !ok {
 			out("SOPORTE FALTA (opcional): " + f)
 			continue
 		}
-		dst := filepath.Join(SysWOW64, f)
-		if _, err := os.Stat(dst); err != nil {
-			if cpErr := copyFile(src, dst); cpErr != nil {
-				failed = append(failed, f+" (no se pudo copiar a SysWOW64, corre como Admin: "+cpErr.Error()+")")
+		dst := filepath.Join(dir, f)
+		if !iguales(src, nombre, dst) {
+			if err := extraer(src, nombre, dst); err != nil {
+				fallos = append(fallos, f+" (no se pudo copiar a "+dir+", corré como Admin: "+err.Error()+")")
 				continue
 			}
+			out("SOPORTE OK: " + f)
 		}
-		out("SOPORTE OK: " + f)
 	}
-	return failed
+	return fallos
+}
+
+// colaDeCarpeta nombra la carpeta legacy solo si hay una configurada. Con legacy_dir
+// vacío el mensaje no puede sugerir que el archivo se buscó en algún lado.
+func (o OrigenOCX) colaDeCarpeta() string {
+	if o.Carpeta == "" {
+		return " y no hay carpeta legacy configurada"
+	}
+	return " ni en " + o.Carpeta
 }
 
 // DockerPatchBudget es el maximo de chars que puede medir la clave del parche
@@ -196,12 +302,4 @@ func utf16le(s string) []byte {
 		b = append(b, byte(r), byte(r>>8))
 	}
 	return b
-}
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0644)
 }

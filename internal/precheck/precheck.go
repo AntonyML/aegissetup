@@ -12,6 +12,7 @@
 package precheck
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -190,7 +191,7 @@ func Run(cfg config.Config, appPass string, s Sondas) []Requisito {
 		out = append(out, veredicto(ReqDocker, "Docker en marcha",
 			"El perfil de pruebas corre SQL Server 2019 en un contenedor.",
 			ok, det,
-			"Instalá Docker Desktop y levantá el motor: docker compose -f docker/docker-compose.yml up -d"))
+			"Instalá Docker Desktop y levantá el motor: "+comandoCompose(cfg)+notaCompose))
 	}
 
 	estadoMotor, detMotor := s.Motor(cfg.Server)
@@ -245,24 +246,33 @@ func Run(cfg config.Config, appPass string, s Sondas) []Requisito {
 		out = append(out, aviso(ReqOCX, "Controles OCX de VB6",
 			"Sin los OCX registrados la app falla con error 339 al abrir pantallas.",
 			"faltan registrar en SysWOW64: "+resumenLista(ocx.FaltanEnSysWOW64),
-			"Se resuelve solo: corré Setup App (menú [2]) y los copia y registra."))
+			"Se resuelve solo: corré Setup App (menú [2]); los 22 controles viajan dentro de Aegis.exe."))
 	default:
-		// Faltan y no hay origen: no se bloquea nada a propósito. Bloquear dejaría
-		// al operador sin ninguna acción del menú que lo arregle.
+		// Faltan y no hay de dónde sacarlos: es un EXE mal armado. No se bloquea nada a
+		// propósito: bloquear dejaría al operador sin ninguna acción del menú que lo
+		// arregle.
 		out = append(out, aviso(ReqOCX, "Controles OCX de VB6",
 			"Sin los OCX registrados la app falla con error 339 al abrir pantallas.",
-			"faltan en SysWOW64 y tampoco están en el origen: "+resumenLista(ocx.FaltanEnOrigen),
-			"Copiá los OCX de la PC vieja a "+cfg.LegacyDir+" y corré Setup App (menú [2])."))
+			"faltan en SysWOW64 y tampoco vienen en el binario: "+resumenLista(ocx.FaltanEnOrigen),
+			"Este Aegis.exe no trae los controles (¿es una compilación vieja?). Con el EXE oficial se resuelve solo; si no, copiá los OCX "+origenOCXTexto(cfg)+" y corré Setup App (menú [2])."))
+	}
+
+	motivoApp := "Es el sistema que se está instalando: sin sus archivos no hay nada que configurar."
+	// app_dir puede estar vacío: es la PC recién instalada, donde todavía nadie dijo
+	// dónde está SIDC. El título y el arreglo tienen que decirlo; si no, el operador lee
+	// "Archivos de SIDC en " y no sabe qué le están pidiendo ni dónde.
+	tituloApp := "Archivos de SIDC en " + cfg.AppDir
+	arregloApp := "Copiá la carpeta de SIDC desde la PC vieja a " + cfg.AppDir + "."
+	if cfg.AppDir == "" {
+		tituloApp = "Carpeta de SIDC (app_dir sin configurar)"
+		arregloApp = "Decí dónde está SIDC: elegí el perfil en el menú (tecla P) o corré aegis configure --app-dir <ruta>."
 	}
 
 	if faltan := s.AppFiles(cfg.AppDir); len(faltan) > 0 {
-		out = append(out, veredicto(ReqApp, "Archivos de SIDC en "+cfg.AppDir,
-			"Es el sistema que se está instalando: sin sus archivos no hay nada que configurar.",
-			false, "falta: "+resumenLista(faltan),
-			"Copiá la carpeta de SIDC desde la PC vieja a "+cfg.AppDir+"."))
+		out = append(out, veredicto(ReqApp, tituloApp, motivoApp,
+			false, "falta: "+resumenLista(faltan), arregloApp))
 	} else {
-		out = append(out, veredicto(ReqApp, "Archivos de SIDC en "+cfg.AppDir,
-			"Es el sistema que se está instalando: sin sus archivos no hay nada que configurar.",
+		out = append(out, veredicto(ReqApp, tituloApp, motivoApp,
 			true, "exe + reportes + fotos presentes", ""))
 	}
 
@@ -359,9 +369,25 @@ func porEstado(id ID, titulo, motivo string, e Estado, detalle, arreglo string) 
 // contenedor que hay que levantar, el de prod es un servicio que ya debería estar.
 func arregloMotor(cfg config.Config) string {
 	if cfg.DbMode == config.DbDocker {
-		return "Levantá el motor de pruebas: docker compose -f docker/docker-compose.yml up -d"
+		return "Levantá el motor de pruebas: " + comandoCompose(cfg) + notaCompose
 	}
 	return "En prod revisá que el servicio SQL Server esté corriendo y que el nombre del servidor sea el correcto."
+}
+
+// notaCompose aclara de dónde sale el archivo que el operador está por levantar: es material
+// que Aegis deja en la PC al correr el paso 1, no algo del repo ni algo que haya que copiar a
+// mano. Sin esa aclaración, un archivo que todavía no está se lee como una instalación rota.
+const notaCompose = " (Aegis deja ese archivo al correr Setup DB)"
+
+// comandoCompose es el comando exacto que levanta el SQL de pruebas en ESTA PC. La ruta sale
+// de docker_dir (donde el paso 1 deja el kit) y no de una carpeta del repo: en la PC destino
+// no hay repo, y un comando que apunta a una ruta inexistente no se puede pegar.
+func comandoCompose(cfg config.Config) string {
+	dir := cfg.DockerDir
+	if dir == "" {
+		dir = config.DirDocker()
+	}
+	return "docker compose -f " + filepath.Join(dir, "docker-compose.yml") + " up -d"
 }
 
 // arregloODBC distingue el driver de dev (ODBC Driver 17, instalable desde
@@ -374,6 +400,16 @@ func arregloODBC(driver string) string {
 }
 
 // resumenLista acorta listas largas: 41 DLLs no se leen en pantalla.
+// origenOCXTexto nombra dónde puede dejar los controles el operador si su binario no los
+// trae. Con legacy_dir vacío no hay carpeta que nombrar y el mensaje tiene que seguir
+// diciendo algo que se pueda hacer.
+func origenOCXTexto(cfg config.Config) string {
+	if cfg.LegacyDir == "" {
+		return "al lado de la carpeta donde está Aegis.exe (y configurá legacy_dir)"
+	}
+	return "a " + cfg.LegacyDir
+}
+
 func resumenLista(xs []string) string {
 	const tope = 4
 	if len(xs) <= tope {

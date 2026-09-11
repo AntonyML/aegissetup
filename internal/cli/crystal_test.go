@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -75,7 +76,16 @@ func stubCrystalCLI(t *testing.T, origen fs.FS, destino string, orden ...*[]stri
 	fsPrevio, dirPrevio, regPrevio := crystalFS, crystalDir, registrarCOM
 	registrados := &[]string{}
 	crystalFS, crystalDir = origen, destino
+	// Igual que el stub de los OCX: el regsvr32 de 32 bits es el mismo para los dos
+	// instaladores, así que cada uno reconoce lo suyo por la carpeta de destino y el
+	// orden en que se llamen los stubs no cambia el resultado.
 	registrarCOM = func(ruta string) error {
+		if !strings.HasPrefix(ruta, destino) {
+			if regPrevio != nil {
+				return regPrevio(ruta)
+			}
+			return nil
+		}
 		*registrados = append(*registrados, ruta)
 		if ordenPtr != nil {
 			*ordenPtr = append(*ordenPtr, "crystal")
@@ -94,6 +104,7 @@ func TestSetupAppInstalaElRuntimeDeCrystal(t *testing.T) {
 		"crviewer.dll": {Data: []byte("runtime")},
 		"crpe32.dll":   {Data: []byte("puente odbc")},
 	}, destino)
+	stubOCXCLI(t, kitDeMentira(), t.TempDir())
 	stubPaso2(t, nil)
 
 	cfg := config.Default()
@@ -116,6 +127,7 @@ func TestSetupAppInstalaElRuntimeDeCrystal(t *testing.T) {
 // el .exe de la app, así que tiene que ver el entorno ya preparado.
 func TestElRuntimeSeInstalaAntesDelParcheDocker(t *testing.T) {
 	var orden []string
+	stubOCXCLI(t, kitDeMentira(), t.TempDir(), &orden)
 	stubCrystalCLI(t, fstest.MapFS{"crviewer.dll": {Data: []byte("runtime")}}, t.TempDir(), &orden)
 	stubPaso2(t, &orden)
 
@@ -125,15 +137,40 @@ func TestElRuntimeSeInstalaAntesDelParcheDocker(t *testing.T) {
 	if err := ejecutarSetupApp(cfg, setupAppOpts{appPass: "clave", patch: true}, func(string) {}); err != nil {
 		t.Fatalf("Setup App falló: %v", err)
 	}
-	if len(orden) != 3 || orden[0] != "dsn" || orden[1] != "crystal" || orden[2] != "parche" {
-		t.Errorf("orden de los pasos = %v, quiero [dsn crystal parche]", orden)
+	if got := sinRepetir(orden); !mismoOrden(got, []string{"dsn", "ocx", "crystal", "parche"}) {
+		t.Errorf("orden de los pasos = %v, quiero [dsn ocx crystal parche]", got)
 	}
+}
+
+// sinRepetir deja el primer paso de cada tramo: los 11 controles y los 4 componentes se
+// registran de a uno, así que el orden real llega con el mismo paso repetido.
+func sinRepetir(xs []string) []string {
+	var out []string
+	for i, x := range xs {
+		if i == 0 || xs[i-1] != x {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+func mismoOrden(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Parchear con clave vacía deja un _DOCKER.exe que arranca y falla al conectar: peor
 // que no generarlo, porque parece instalado.
 func TestElParcheDockerSinClaveNoSeHace(t *testing.T) {
 	stubCrystalCLI(t, fstest.MapFS{"crviewer.dll": {Data: []byte("runtime")}}, t.TempDir())
+	stubOCXCLI(t, kitDeMentira(), t.TempDir())
 	var orden []string
 	stubPaso2(t, &orden)
 

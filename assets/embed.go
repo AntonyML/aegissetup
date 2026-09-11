@@ -58,6 +58,20 @@ func Crystal() fs.FS {
 	return sub
 }
 
+// OCX es el kit de controles OCX/DLL de VB6 listo para instalar, con la raíz en la
+// propia carpeta del kit (misma razón que Crystal(): se copian a SysWOW64 y una raíz
+// con prefijo haría que se copiara una carpeta).
+//
+// En una PC limpia estos archivos no existen en ningún lado: o vienen del binario o el
+// operador tiene que conseguirlos de la PC vieja, que es justo lo que F7 elimina.
+func OCX() fs.FS {
+	sub, err := fs.Sub(Legacy, "legacy/ocx")
+	if err != nil {
+		panic("los controles OCX no están en el embed: " + err.Error())
+	}
+	return sub
+}
+
 func resumir() Resumen {
 	var r Resumen
 	err := fs.WalkDir(Legacy, ".", func(_ string, d fs.DirEntry, err error) error {

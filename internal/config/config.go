@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 )
 
 // DbMode dice dónde vive la base en cada ambiente.
@@ -35,7 +36,7 @@ type Config struct {
 	Collation string `json:"collation"`  // ej Modern_Spanish_CI_AS (debe igualar prod)
 	Compat    int    `json:"compat"`     // 120 = SQL 2014 como CONTABILIDAD
 	AppDir    string `json:"app_dir"`    // donde vive SIDC, ej C:\DEV\SIDC
-	DockerDir string `json:"docker_dir"` // donde está el compose, ej C:\DEV\SIDC\docker-dev
+	DockerDir string `json:"docker_dir"` // donde Aegis deja el compose del SQL de pruebas
 	BackupDir string `json:"backup_dir"` // donde dejas el .bak, ej C:\DEV\SIDC\AegisSetup\assets\backups\sqlserver2014
 	LegacyDir string `json:"legacy_dir"` // donde dejas los OCX de la PC vieja
 }
@@ -53,12 +54,14 @@ func Default() Config {
 		SQLUser:    "dev",
 		Collation:  "Modern_Spanish_CI_AS",
 		Compat:     120,
-		AppDir:     `C:\DEV\SIDC`,
-		DockerDir:  `C:\DEV\SIDC\docker-dev`,
+		AppDir:     "",
+		DockerDir:  DirDocker(),
 		// El respaldo vive en el árbol de máquina (F3): en una PC limpia no hay
 		// repo del que sacarlo. En dev se sigue encontrando por BackupDirs().
 		BackupDir: DirBackups(),
-		LegacyDir: `C:\DEV\SIDC\AegisSetup\assets\legacy\ocx`,
+		// legacy_dir vacío = los OCX salen del propio binario. Es una carpeta extra
+		// para el control que no venga adentro, no un requisito de la instalación.
+		LegacyDir: "",
 	}
 }
 
@@ -95,6 +98,15 @@ func Load(path string) (Config, error) {
 	}
 	if err := json.Unmarshal(merged, &cfg); err != nil {
 		return Config{}, fmt.Errorf("config: %s inválido: %w", path, err)
+	}
+	// docker_dir la administra Aegis: el compose se extrae del propio EXE, así que la
+	// carpeta tiene que ser una que exista de verdad en esta PC. Un config.json viejo puede
+	// traer la carpeta del repo de quien programa Aegis —que en la PC destino no existe, y
+	// con ella el arreglo del motor mandaría a correr un comando que no puede funcionar— o
+	// una ruta relativa, que se resolvería contra el directorio de trabajo. En esos casos se
+	// usa la carpeta del producto. Una carpeta propia que sí existe se respeta.
+	if cfg.DockerDir == "" || !RutaAbsoluta(cfg.DockerDir) || !existeDir(cfg.DockerDir) {
+		cfg.DockerDir = DirDocker()
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -139,8 +151,33 @@ func (c Config) Validate() error {
 	if c.Compat != 110 && c.Compat != 120 && c.Compat != 130 && c.Compat != 140 && c.Compat != 150 && c.Compat != 160 {
 		return fmt.Errorf("config: compat %d no válido (110|120|130|140|150|160)", c.Compat)
 	}
-	if c.AppDir == "" || c.BackupDir == "" {
-		return fmt.Errorf("config: app_dir y backup_dir son obligatorios")
+	if c.BackupDir == "" {
+		return fmt.Errorf("config: backup_dir vacío (es la carpeta donde se deja el .bak)")
+	}
+	// app_dir puede estar vacío: es la PC recién instalada donde todavía nadie dijo
+	// dónde está SIDC, y quien lo pide es el perfil del TUI (o --app-dir). Pero si
+	// viene, tiene que ser absoluta: una ruta relativa se resuelve contra el directorio
+	// de trabajo del proceso, así que la misma config mediría carpetas distintas según
+	// desde dónde se lance Aegis.
+	if c.AppDir != "" && !RutaAbsoluta(c.AppDir) {
+		return fmt.Errorf("config: app_dir %q tiene que ser una ruta absoluta (ej. C:\\SIDC)", c.AppDir)
 	}
 	return nil
+}
+
+// existeDir dice si la ruta está en disco y es una carpeta.
+func existeDir(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.IsDir()
+}
+
+// RutaAbsoluta reconoce las rutas de Windows (C:\, C:/, \\\\servidor\recurso) sin
+// depender del sistema donde corre el proceso: el instalador es de Windows, pero parte
+// del desarrollo y de las pruebas corre en Linux, y ahí filepath.IsAbs diría que
+// "C:\\SIDC" no es absoluta.
+func RutaAbsoluta(p string) bool {
+	if strings.HasPrefix(p, `\\`) || strings.HasPrefix(p, "/") {
+		return true
+	}
+	return len(p) >= 3 && p[1] == ':' && (p[2] == '\\' || p[2] == '/')
 }

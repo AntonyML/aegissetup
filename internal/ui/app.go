@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,6 +33,11 @@ const (
 	// estamos. Va antes del menú porque el menú ya asume un ambiente.
 	screenPerfil
 	screenServer
+	// screenAppDir pregunta dónde está la carpeta de SIDC. Va después del perfil porque
+	// no es una preferencia sino un dato de esta PC: en una PC limpia no hay de dónde
+	// sacarlo, y el default del desarrollador (C:\DEV\SIDC) hacía que el instalador
+	// midiera la máquina donde se programó Aegis en vez de la que está instalando.
+	screenAppDir
 )
 
 type taskKind int
@@ -96,6 +102,15 @@ type Model struct {
 	// tiene que ser propiedad del campo, no de por dónde pasó el flujo.
 	srvInput textinput.Model
 	srvErr   string
+	// dirInput y dirErr son el prompt de la carpeta de SIDC, y perfilPendiente es el
+	// perfil que se está aplicando mientras se contestan sus preguntas: el server
+	// primero, la carpeta después, y la config se guarda recién cuando no falta ninguna.
+	dirInput        textinput.Model
+	dirErr          string
+	perfilPendiente action
+	// presetAppDir es el flag --app-dir: cuando viene, la carpeta ya está dicha y no hay
+	// nada que preguntar (camino no interactivo).
+	presetAppDir string
 }
 
 var menuItems = []menuEntry{
@@ -131,6 +146,13 @@ func NewModel(cfg config.Config, cfgPath string) Model {
 // CLI). Devuelve una copia con el valor puesto; no muta el original.
 func (m Model) SetPresetServer(s string) Model {
 	m.presetServer = s
+	return m
+}
+
+// SetPresetAppDir fija la carpeta de SIDC del perfil (flag --app-dir del CLI). Con
+// esto puesto el TUI no pregunta: es el camino para la instalación desatendida.
+func (m Model) SetPresetAppDir(dir string) Model {
+	m.presetAppDir = dir
 	return m
 }
 
@@ -201,6 +223,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePerfil(msg)
 		case screenServer:
 			return m.updateServer(msg)
+		case screenAppDir:
+			return m.updateAppDir(msg)
 		case screenMenu:
 			switch msg.String() {
 			case "up", "k":
@@ -304,19 +328,44 @@ func indexDePerfil(a action) int {
 	return 0
 }
 
-// elegirPerfil aplica el perfil elegido. Prod server primero pregunta el nombre: un
-// nombre inventado manda al operador a un "motor no alcanzable" que no describe su
-// problema, y encima queda escrito en el config.
+// elegirPerfil aplica el perfil elegido, pasando por sus preguntas. Prod server primero
+// pregunta el nombre: un nombre inventado manda al operador a un "motor no alcanzable"
+// que no describe su problema, y encima queda escrito en el config. La carpeta de SIDC
+// se pregunta siempre que no la haya dicho un flag: es un dato de la PC, no un default.
 func (m Model) elegirPerfil(p menuEntry) (tea.Model, tea.Cmd) {
-	if p.action == actPresetProdServer && m.presetServer == "" {
+	return m.aplicarPreset(p.action)
+}
+
+// aplicarPreset arranca la cadena de preguntas de un perfil y guarda cuál se está
+// aplicando: la config no se toca hasta que estén todas contestadas, así que un perfil a
+// medio contestar no puede quedar escrito en disco.
+func (m Model) aplicarPreset(a action) (tea.Model, tea.Cmd) {
+	m.perfilPendiente = a
+	return m.siguientePregunta("")
+}
+
+// siguientePregunta pide el próximo dato que falte y, si no falta ninguno, aplica el
+// perfil. El server que vino por --server y la carpeta que vino por --app-dir ya están
+// dichos: el camino no interactivo pasa de largo por las dos preguntas.
+func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
+	a := m.perfilPendiente
+	if a == actPresetProdServer && m.presetServer == "" {
 		m.srvInput = newServerInput(m.sugerenciaServer())
 		m.srvErr = ""
 		m.screen = screenServer
 		return m, nil
 	}
-	// presetServer es el flag --server: cuando viene, el nombre ya está dicho y no
-	// hay nada que preguntar (camino no interactivo).
-	return m.aplicarPerfil(p.action, m.presetServer)
+	if appDir == "" {
+		appDir = m.presetAppDir
+	}
+	if appDir == "" {
+		valor, ejemplo := m.sugerenciaAppDir()
+		m.dirInput = newAppDirInput(valor, ejemplo)
+		m.dirErr = ""
+		m.screen = screenAppDir
+		return m, nil
+	}
+	return m.aplicarPerfil(a, m.presetServer, appDir)
 }
 
 // sugerenciaServer es lo único que podemos ofrecer como ejemplo. No se precarga en
@@ -345,6 +394,52 @@ func newServerInput(sugerencia string) textinput.Model {
 	return ti
 }
 
+// sugerenciaAppDir es lo que ofrece el prompt de la carpeta de SIDC: el valor ya
+// conocida (flag --app-dir, config actual o el repo deducido desde la posición del EXE)
+// y, si no hay ninguna, un ejemplo para que el campo no quede mudo.
+//
+// El valor se precarga y el ejemplo no: un ejemplo precargado se guarda tal cual sin que
+// nadie lo lea, y ahí SIDC puede estar en C:\SIDC, en C:\SIDC2014 o en otro disco. La
+// carpeta del repo sí se puede precargar porque la posición del EXE la prueba: un
+// aegis.exe en …\SIDC\AegisSetup\bin está dentro del repo, y el repo es la app de dev.
+func (m Model) sugerenciaAppDir() (valor, ejemplo string) {
+	if m.presetAppDir != "" {
+		return m.presetAppDir, ""
+	}
+	if m.cfg.AppDir != "" {
+		return m.cfg.AppDir, ""
+	}
+	if m.cfg.Env == "dev" {
+		if d := carpetaDelRepo(); d != "" {
+			return d, ""
+		}
+	}
+	return "", `C:\SIDC`
+}
+
+// carpetaDelRepo deduce la raíz del repo desde la posición del propio EXE, y devuelve ""
+// cuando el binario no está donde Aegis lo pone (un EXE suelto en el Escritorio o la
+// carpeta temporal de go run): ahí no hay repo y no se puede inventar una carpeta.
+func carpetaDelRepo() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	kit := filepath.Dir(filepath.Dir(exe)) // …\SIDC\AegisSetup\bin\aegis.exe -> …\SIDC\AegisSetup
+	if !strings.EqualFold(filepath.Base(kit), "AegisSetup") {
+		return ""
+	}
+	return filepath.Dir(kit)
+}
+
+func newAppDirInput(valor, ejemplo string) textinput.Model {
+	ti := newServerInput(ejemplo)
+	if valor != "" {
+		ti.SetValue(valor)
+	}
+	return ti
+}
+
 func (m Model) updateServer(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -363,10 +458,46 @@ func (m Model) updateServer(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.srvErr = "Poné el nombre del servidor (ej. CONTABILIDAD, SIDC01 o CONTABILIDAD\\SQLEXPRESS)."
 			return m, nil
 		}
-		return m.aplicarPerfil(actPresetProdServer, server)
+		m.presetServer = server
+		return m.siguientePregunta("")
 	}
 	var cmd tea.Cmd
 	m.srvInput, cmd = m.srvInput.Update(msg)
+	return m, cmd
+}
+
+// updateAppDir pregunta dónde está la carpeta de SIDC. Valida antes de guardar: una ruta
+// relativa se resolvería contra el directorio de trabajo del proceso, así que la misma
+// config mediría carpetas distintas según desde dónde se lance Aegis.
+func (m Model) updateAppDir(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Igual que el nombre del servidor: si venía del arranque, el perfil sigue sin
+		// elegir y caer al menú dejaría la config por defecto, que no es la de esta PC.
+		m.dirErr = ""
+		if m.primeraVez {
+			m.screen = screenPerfil
+			return m, nil
+		}
+		m.screen = screenMenu
+		return m, nil
+	case "enter":
+		dir := strings.TrimSpace(m.dirInput.Value())
+		if dir == "" {
+			m.dirErr = "Poné la carpeta donde está SIDC (ej. C:\\SIDC). Es la que tiene el .exe de SIDC y la carpeta Reportes."
+			return m, nil
+		}
+		// La ruta relativa se rechaza acá y no en Validate: así el operador corrige en
+		// la misma pantalla en vez de caer al error del perfil y tener que empezar de
+		// nuevo. El motivo es el mismo: se resolvería contra el directorio de trabajo.
+		if !config.RutaAbsoluta(dir) {
+			m.dirErr = "Poné la ruta completa, con la letra del disco (ej. C:\\SIDC): " + dir + " se resolvería desde donde se lance Aegis."
+			return m, nil
+		}
+		return m.siguientePregunta(dir)
+	}
+	var cmd tea.Cmd
+	m.dirInput, cmd = m.dirInput.Update(msg)
 	return m, cmd
 }
 
@@ -374,8 +505,8 @@ func (m Model) updateServer(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // adorno: el checklist viejo describe la máquina según el ambiente anterior, así que
 // conservarlo dejaría al operador trabado por requisitos del ambiente que acaba de
 // abandonar (Docker, por ejemplo, en una PC de producción).
-func (m Model) aplicarPerfil(a action, server string) (tea.Model, tea.Cmd) {
-	cfg, err := presetConfig(m.cfg, a, server)
+func (m Model) aplicarPerfil(a action, server, appDir string) (tea.Model, tea.Cmd) {
+	cfg, err := presetConfig(m.cfg, a, server, appDir)
 	if err != nil {
 		return m.errorDePerfil(err)
 	}
@@ -385,6 +516,7 @@ func (m Model) aplicarPerfil(a action, server string) (tea.Model, tea.Cmd) {
 	m.cfg = cfg
 	m.primeraVez = false
 	m.srvErr = ""
+	m.dirErr = ""
 	m.bloqueo = false
 	m.taskErr = nil
 	m.task = taskNone
@@ -394,6 +526,7 @@ func (m Model) aplicarPerfil(a action, server string) (tea.Model, tea.Cmd) {
 	m.lines = []string{
 		fmt.Sprintf("config guardada en %s", m.cfgPath),
 		fmt.Sprintf("env=%s db_mode=%s server=%s auth=%s", cfg.Env, cfg.DbMode, cfg.Server, authLabel(cfg)),
+		fmt.Sprintf("app_dir=%s", cfg.AppDir),
 		"",
 		"Ya está midiendo esta config: mirá el checklist con [C].",
 	}
@@ -503,16 +636,11 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 	case actCheck:
 		return m.startTask(taskCheck, stepTitle(taskCheck))
 	case actPresetDev, actPresetProdLocal, actPresetProdServer:
-		// Prod server sin --server pregunta el nombre en vez de escribir
-		// CONTABILIDAD: un servidor adivinado se ve igual de válido que uno real
-		// hasta que falla la conexión.
-		if a == actPresetProdServer && m.presetServer == "" {
-			m.srvInput = newServerInput(m.sugerenciaServer())
-			m.srvErr = ""
-			m.screen = screenServer
-			return m, nil
-		}
-		return m.aplicarPerfil(a, m.presetServer)
+		// Los presets preguntan lo que no se puede adivinar: el nombre del servidor en
+		// prod server y, en cualquiera, dónde está la carpeta de SIDC. Un servidor
+		// adivinado se ve igual de válido que uno real hasta que falla la conexión, y
+		// una carpeta adivinada mide otra máquina (el default apuntaba al repo de dev).
+		return m.aplicarPreset(a)
 	}
 	return m, nil
 }
@@ -563,6 +691,11 @@ func (m Model) startTask(k taskKind, name string) (tea.Model, tea.Cmd) {
 func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(string) string, emit func(string)) error {
 	switch k {
 	case taskSetupDB:
+		// El kit de Docker va primero: sin el compose no hay motor que levantar, y el
+		// restore que viene después lo necesita arriba.
+		for _, f := range instalarCompose(cfg.DbMode, emit) {
+			emit("DOCKER PENDIENTE: " + f)
+		}
 		bak, err := setup.FindNewestBakCfg(cfg)
 		if err != nil {
 			return err
@@ -579,7 +712,9 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 		if err := escribirDSN(cfg, appPass, savePWD, emit); err != nil {
 			return err
 		}
-		for _, f := range setup.InstallOCX(cfg.LegacyDir, emit) {
+		// Los controles de VB6 salen del propio binario: en una PC limpia no hay
+		// carpeta de la PC vieja de dónde copiarlos.
+		for _, f := range instalarOCX(cfg.LegacyDir, emit) {
 			emit("OCX PENDIENTE: " + f)
 		}
 		// El runtime de Crystal sale del propio binario: en una PC limpia no hay
@@ -617,7 +752,10 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 // presetServer viene del flag --server y solo aplica al preset "prod server":
 // deja elegir el servidor sin editar config.json a mano. Vacío = CONTABILIDAD
 // si la config actual todavía apunta a localhost (dev), o la que ya hubiera.
-func presetConfig(cfg config.Config, a action, presetServer string) (config.Config, error) {
+//
+// appDir es la carpeta de SIDC contestada por el operador (o el flag --app-dir): vacía
+// significa "no la cambio", no "dejala vacía".
+func presetConfig(cfg config.Config, a action, presetServer, appDir string) (config.Config, error) {
 	switch a {
 	case actPresetDev:
 		cfg.Env, cfg.DbMode, cfg.Server = "dev", config.DbDocker, "localhost,14333"
@@ -633,6 +771,9 @@ func presetConfig(cfg config.Config, a action, presetServer string) (config.Conf
 			cfg.Server = "CONTABILIDAD"
 		}
 		cfg.UseWinAuth, cfg.Driver = true, "SQL Server"
+	}
+	if appDir != "" {
+		cfg.AppDir = appDir
 	}
 	if err := cfg.Validate(); err != nil {
 		return config.Config{}, err
@@ -657,6 +798,8 @@ func (m Model) View() tea.View {
 		content = m.viewPerfil()
 	case screenServer:
 		content = m.viewServer()
+	case screenAppDir:
+		content = m.viewAppDir()
 	default:
 		content = m.viewMenu()
 	}
@@ -817,6 +960,37 @@ func (m Model) viewServer() string {
 	return s.Box.Render(b.String())
 }
 
+// viewAppDir pide la carpeta de SIDC. El pedido dice qué se espera encontrar adentro,
+// porque el operador tiene que reconocer la carpeta correcta y no una parecida: si
+// apunta a la carpeta equivocada, el checklist mide otra cosa y todo lo que siga sale mal.
+func (m Model) viewAppDir() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("CARPETA DE SIDC") + "\n\n")
+	b.WriteString(s.Value.Render("¿Dónde está la carpeta de SIDC?") + "\n\n")
+	b.WriteString("  " + m.dirInput.View() + "\n")
+	if m.dirErr != "" {
+		b.WriteString("\n" + s.Error.Render("✖ ") + s.Value.Render(m.dirErr) + "\n")
+	}
+	b.WriteString("\n" + s.SectionHeader.Render("QUÉ TIENE QUE TENER ESA CARPETA") + "\n")
+	for _, e := range [][2]string{
+		{"Sistema Intergrado de Controles y Presupuesto.exe", "el ejecutable de SIDC"},
+		{"Reportes\\", "unos 57 archivos .rpt"},
+		{"Fotos\\Principal.jpg", "la foto de la pantalla principal"},
+	} {
+		b.WriteString("  " + s.Value.Render(e[0]) + "  " + s.Muted.Render(e[1]) + "\n")
+	}
+	b.WriteString("\n" + s.SectionHeader.Render("EJEMPLOS") + "\n")
+	b.WriteString("  " + s.Value.Render(`C:\SIDC`) + "  " + s.Muted.Render("lo más común") + "\n")
+	b.WriteString("  " + s.Value.Render(`C:\SIDC2014`) + "  " + s.Muted.Render("si el nombre delata la versión del motor") + "\n")
+	b.WriteString("  " + s.Value.Render(`D:\SIDC`) + "  " + s.Muted.Render("cuando la app vive en otro disco") + "\n")
+	b.WriteString("\n" + s.Muted.Render("Se guarda en config.json como app_dir y queda para las próximas corridas.") + "\n")
+	b.WriteString("\n" + s.HelpBar.Render(
+		s.Key.Render("[Enter]")+s.Desc.Render(" aceptar   ")+
+			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
+	return s.Box.Render(b.String())
+}
+
 func (m Model) viewAsk() string {
 	s := m.styles
 	if len(m.askQueue) == 0 {
@@ -882,14 +1056,15 @@ func renderHelp(s Styles) string {
 		"- Claves por entorno o pedidas al inicio, jamás en config.json.\n\n" +
 		"Primera vez:\n\n" +
 		"- Sin config.json el TUI pregunta en qué PC estamos: Pruebas (Docker), Producción en esta PC o Producción en un servidor.\n" +
+		"- Después pregunta dónde está la carpeta de SIDC (app_dir): en una PC limpia ese dato no se puede adivinar.\n" +
 		"- Elige una vez y queda guardada; los presets 4-6 la cambian después.\n" +
 		"- Cambiar de perfil recalcula el checklist: los requisitos de Docker no aplican en la PC de producción.\n\n" +
 		"Drops manuales (tu los pones):\n\n" +
-		"- assets/backups/sqlserver2014/ -> el .bak de SIDC (SQL 2014).\n" +
-		"- assets/legacy/ocx/ -> los 11 OCX de la PC vieja.\n" +
+		"- El .bak de SIDC (SQL 2014) en la carpeta de backups; el checklist dice la ruta exacta de esta máquina.\n" +
 		"- assets/oldpc/NOTAS.txt -> DSN, collation, usuarios app.\n\n" +
-		"El runtime de Crystal (43 archivos, 24 MB) ya no es un drop manual: viaja dentro del\n" +
-		"EXE y Setup App lo copia a SysWOW64 y registra los 4 componentes COM.\n\n" +
+		"Ya no son drops manuales:\n\n" +
+		"- El runtime de Crystal (43 archivos, 24 MB) viaja dentro del EXE: Setup App lo copia a SysWOW64 y registra los 4 componentes COM.\n" +
+		"- Los 11 controles OCX de VB6 y sus 11 dependencias también viajan dentro del EXE.\n\n" +
 		"Permisos de administrador:\n\n" +
 		"- [E] pide permisos y relanza Aegis elevado; check, checklist y dashboard nunca los piden.\n" +
 		"- Desde la consola, setup-db y setup-app se elevan solos (el padre espera y devuelve el mismo código).\n" +

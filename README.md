@@ -107,7 +107,7 @@ $ aegis checklist
 FALTA  3. Docker en marcha
            docker no responde (¿está instalado y el motor encendido?)
            por qué: El perfil de pruebas corre SQL Server 2019 en un contenedor.
-           arreglo: Instalá Docker Desktop y levantá el motor: docker compose -f docker/docker-compose.yml up -d
+           arreglo: Instalá Docker Desktop y levantá el motor: docker compose -f C:\ProgramData\AegisSetup\docker\docker-compose.yml up -d (Aegis deja ese archivo al correr Setup DB)
            traba:   Setup DB, Instalación completa
 ```
 
@@ -189,13 +189,13 @@ Los códigos de salida están documentados arriba, con el checklist.
 cd AegisSetup
 go build -o bin/aegis.exe ./cmd/aegis
 
-./bin/aegis configure --env dev --db-mode docker   # 1. genera config.json
-./bin/aegis checklist                                # 2. ¿la máquina está lista? (exit 3 = no)
-docker compose -f docker/docker-compose.yml up -d   # 3. base dev (SQL 2019, compat 120)
-./bin/aegis setup-db                                 # 4. restaura el .bak como SIDC
-./bin/aegis setup-app                                # 5. DSN + OCX + verificación
-./bin/aegis check                                    # 6. valida App ⇄ DB
-./bin/aegis menu                                     # o todo de un tirón desde la TUI
+./bin/aegis configure --env dev --db-mode docker   # 1. config.json + kit de Docker
+./bin/aegis checklist                               # 2. ¿la máquina está lista? (exit 3 = no)
+docker compose -f "$env:ProgramData\AegisSetup\docker\docker-compose.yml" up -d   # 3. base dev
+./bin/aegis setup-db                                # 4. restaura el .bak como SIDC
+./bin/aegis setup-app                               # 5. DSN + OCX + Crystal + verificación
+./bin/aegis check                                   # 6. valida App ⇄ DB
+./bin/aegis menu                                    # o todo de un tirón desde la TUI
 ```
 
 En una PC nueva, `./bin/aegis menu` es el primer paso real: pregunta el perfil, lo guarda y
@@ -220,18 +220,21 @@ de ahí en adelante todo lo demás usa esa configuración.
   "sql_user": "dev",
   "collation": "Modern_Spanish_CI_AS",
   "compat": 120,
-  "app_dir": "C:\\DEV\\SIDC",
-  "docker_dir": "C:\\DEV\\SIDC\\docker-dev",
+  "app_dir": "C:\\SIDC",
+  "docker_dir": "C:\\ProgramData\\AegisSetup\\docker",
   "backup_dir": "C:\\ProgramData\\AegisSetup\\assets\\backups\\sqlserver2014",
-  "legacy_dir": "C:\\DEV\\SIDC\\AegisSetup\\assets\\legacy\\ocx"
+  "legacy_dir": ""
 }
 ```
 
 > `database` (`SIDC`) y `dsn_name` (`SIDC_SQL`) son fijos: el `.exe` los trae hardcodeados.
 >
-> **`app_dir`, `docker_dir` y `legacy_dir` todavía traen rutas de la máquina de
-desarrollo.** En una PC de FEMUCARIBE hay que apuntarlos a donde esté SIDC. `backup_dir`
-ya usa la ruta de máquina correcta (ver abajo).
+> **Ningún default apunta a la máquina de desarrollo.** `app_dir` no tiene default (lo dice el
+> perfil del TUI o `--app-dir`), `backup_dir` y `docker_dir` viven bajo `ProgramData`, y
+> `legacy_dir` vacío significa que los OCX salen del propio binario.
+>
+> `docker_dir` es una carpeta que administra Aegis: si el `config.json` trae una que no existe
+> (por ejemplo la del repo de quien programa Aegis), al cargar se repara a la del producto.
 
 ### Rutas de datos
 
@@ -294,19 +297,26 @@ export AEGIS_SQL_PASSWORD='...'
 ## Flujo de desarrollo con Docker
 
 `docker/docker-compose.yml` levanta un **SQL Server 2019 Developer** que replica
-producción (collation `Modern_Spanish_CI_AS`, compat `120`).
+producción (collation `Modern_Spanish_CI_AS`, compat `120`). El kit (compose, guía,
+`.env.example` e `init/`) **viaja dentro del `.exe`** y Aegis lo deja en `docker_dir`, así que
+en la PC destino no hace falta el repo:
 
 ```bash
-cp docker/.env.example docker/.env      # ajustá SA_PASSWORD
-docker compose -f docker/docker-compose.yml up -d
+# Aegis ya dejó el kit en C:\ProgramData\AegisSetup\docker (lo hace configure y el paso 1)
+cd "$env:ProgramData\AegisSetup\docker"
+copy .env.example .env                  # ajustá SA_PASSWORD
+docker compose up -d
 ```
+
+> El `.env` **no** va dentro del binario: tiene la clave del `sa` de quien desarrolla. Lo
+> sostienen el `.gitignore` y el test `TestLaClaveDelDesarrolladorNoViajaEnElBinario`.
 
 | Dato | Valor |
 | --- | --- |
 | Contenedor | `sidc_sql2019` |
 | Puerto | `14333` → `1433` |
 | Memoria | `mem_limit: 2g` |
-| Respaldo | `assets/backups/sqlserver2014` montado `:ro` |
+| Respaldo | `<ProgramData>\AegisSetup\assets\backups\sqlserver2014` montado `:ro` |
 
 La guía detallada está en [`docker/GUIA-DOCKER.txt`](docker/GUIA-DOCKER.txt).
 
@@ -321,6 +331,8 @@ Estos artefactos **no** van al control de versiones y los colocás vos antes de 
 | `assets/legacy/crystal/` | Runtime de Crystal Reports 8. Va dentro del binario: Setup App lo instala solo (no es un paso manual). |
 | `assets/oldpc/NOTAS.txt` | DSN, collation y usuarios de la app (referencia). |
 
+El compose del SQL de pruebas **no** lo aporta el operador: viaja dentro del binario.
+
 ## Estructura
 
 ```text
@@ -333,7 +345,7 @@ AegisSetup/
 │   ├── precheck/       # checklist de requisitos + política de qué traba qué
 │   ├── check/          # verificación TCP + SQL + DSN + ficheros
 │   └── ui/             # TUI Bubble Tea (menú, checklist-puerta, pasos, prompts)
-├── docker/             # SQL Server 2019 para dev + guía
+├── docker/             # SQL Server 2019 para dev (paquete Go: embed del kit + guía)
 ├── assets/             # backups / legacy / oldpc (fuera del repo)
 ├── scripts/legacy/     # scripts de migración de la PC vieja (referencia)
 └── bin/                # binario compilado

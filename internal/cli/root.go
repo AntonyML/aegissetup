@@ -106,7 +106,7 @@ func asegurarAdmin(w io.Writer, sub string, args []string) (bool, int, error) {
 // NewRootCmd crea el comando raíz y registra setup-db, setup-app, check, dashboard, menu, configure.
 func NewRootCmd(exeDir string, cfgLoader func(cfgPath string) (config.Config, error)) *cobra.Command {
 	var configPath string
-	var presetServer string
+	var presetServer, appDir string
 
 	cmd := &cobra.Command{
 		Use:   "aegis",
@@ -129,7 +129,7 @@ Subcomandos:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if isTerminal(os.Stdin) {
 				cfg, path, err := resolveCfg(exeDir, configPath, cfgLoader)
-				return runMenu(cmd, cfg, path, err, presetServer)
+				return runMenu(cmd, cfg, path, err, opcionesTUI{server: presetServer, appDir: appDir})
 			}
 			_ = cmd.Help()
 			return ErrNoTTY
@@ -138,6 +138,7 @@ Subcomandos:
 
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "ruta a config.json (default: %APPDATA%\\AegisSetup\\config.json)")
 	cmd.PersistentFlags().StringVar(&presetServer, "server", "", "server para el preset 'prod server' del TUI (ej. aegis --server MI_SERVIDOR)")
+	cmd.PersistentFlags().StringVar(&appDir, "app-dir", "", "carpeta donde está SIDC en esta PC (ej. --app-dir C:\\SIDC); sin esto el menú la pregunta")
 
 	cmd.AddCommand(newSetupDbCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
@@ -156,7 +157,7 @@ Subcomandos:
 	}))
 	cmd.AddCommand(newMenuCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
-	}, func() string { return presetServer }))
+	}, func() opcionesTUI { return opcionesTUI{server: presetServer, appDir: appDir} }))
 	cmd.AddCommand(newConfigureCmd(exeDir))
 
 	return cmd
