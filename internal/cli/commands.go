@@ -4,10 +4,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"aegis-setup/internal/check"
 	"aegis-setup/internal/config"
+	"aegis-setup/internal/precheck"
 	"aegis-setup/internal/setup"
 
 	"github.com/spf13/cobra"
@@ -84,6 +87,9 @@ func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Verifica que App y DB se hablan (TCP + SQL + DSN + ficheros)",
+		// Un reporte con código de salida no es un error de uso: volcar el "Usage"
+		// acá tapa con 15 líneas de ayuda lo único que el operador quiere leer.
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := res()
 			if err != nil {
@@ -103,13 +109,102 @@ func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s %-22s %s\n", mark, r.Name, r.Info)
 			}
 			if fail > 0 {
-				return fmt.Errorf("check: %d fallos", fail)
+				return fmt.Errorf("%w: check: %d fallos", ErrCheckFail, fail)
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&appPass, "app-password", "", "clave login app (o env AEGIS_SQL_PASSWORD)")
 	return cmd
+}
+
+func newChecklistCmd(res func() (config.Config, string, error), sondas func() precheck.Sondas) *cobra.Command {
+	var appPass string
+	cmd := &cobra.Command{
+		Use:   "checklist",
+		Short: "Requisitos de la máquina en orden: qué falta, por qué y cómo resolverlo",
+		// Igual que check: el reporte es la salida, no un error de uso.
+		SilenceUsage: true,
+		Long: `Recorre los requisitos en orden de resolución. Por cada uno que falte dice por
+qué importa, qué hacer y qué opción del menú queda trabada.
+
+Es el mismo checklist que muestra el menú interactivo con [C], en texto plano:
+sirve para pegar la salida en un correo de soporte.
+
+Sale con código 3 si algún requisito traba la instalación, y 0 si no traba ninguno.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, err := res()
+			if err != nil {
+				return err
+			}
+			if appPass == "" {
+				appPass = os.Getenv("AEGIS_SQL_PASSWORD")
+			}
+			return escribirChecklist(cmd.OutOrStdout(), cfg, precheck.Run(cfg, appPass, sondas()))
+		},
+	}
+	cmd.Flags().StringVar(&appPass, "app-password", "", "clave login app (o env AEGIS_SQL_PASSWORD)")
+	return cmd
+}
+
+// marcaCLI usa ASCII a propósito. La TUI puede darse el lujo de los ✓/✗, pero
+// esta salida puede terminar en el cmd.exe viejo de una PC del área, donde esos
+// caracteres salen como basura.
+func marcaCLI(e precheck.Estado) string {
+	switch e {
+	case precheck.EstadoOK:
+		return "OK   "
+	case precheck.EstadoAviso:
+		return "AVISO"
+	default:
+		return "FALTA"
+	}
+}
+
+func escribirChecklist(w io.Writer, cfg config.Config, rs []precheck.Requisito) error {
+	fmt.Fprintln(w, "== AEGIS CHECKLIST ==")
+	fmt.Fprintf(w, "env=%s db_mode=%s server=%s database=%s\n\n", cfg.Env, cfg.DbMode, cfg.Server, cfg.Database)
+
+	for i, r := range rs {
+		fmt.Fprintf(w, "%s %2d. %s\n", marcaCLI(r.Estado), i+1, r.Titulo)
+		if r.Detalle != "" {
+			fmt.Fprintf(w, "           %s\n", r.Detalle)
+		}
+		if r.Estado == precheck.EstadoOK {
+			continue
+		}
+		fmt.Fprintf(w, "           por qué: %s\n", r.Motivo)
+		fmt.Fprintf(w, "           arreglo: %s\n", r.Arreglo)
+		if len(r.Traba) > 0 {
+			fmt.Fprintf(w, "           traba:   %s\n", precheck.Etapas(r.Traba))
+		}
+		fmt.Fprintln(w)
+	}
+
+	bloquean := precheck.Bloqueantes(rs)
+	if len(bloquean) == 0 {
+		faltan := len(precheck.Faltantes(rs))
+		switch {
+		case faltan > 0:
+			fmt.Fprintf(w, "== Nada traba la instalación. Hay %d requisitos sin cumplir que son resultado del flujo (la base y el DSN), no condición para empezar. ==\n", faltan)
+		default:
+			fmt.Fprintln(w, "== Todo en orden: el flujo completo está disponible. ==")
+		}
+		return nil
+	}
+
+	titulos := make([]string, 0, len(bloquean))
+	for _, r := range bloquean {
+		titulos = append(titulos, r.Titulo)
+	}
+	// "1 requisitos" se lee como un bug del programa y no como un dato.
+	verbo := "requisitos traban"
+	if len(bloquean) == 1 {
+		verbo = "requisito traba"
+	}
+	fmt.Fprintf(w, "== %d %s la instalación: %s ==\n", len(bloquean), verbo, strings.Join(titulos, ", "))
+	fmt.Fprintln(w, "== Resolvelos en el orden de la lista: los de arriba destraban a los de abajo. ==")
+	return fmt.Errorf("%w: %d %s la instalación", ErrCheckFail, len(bloquean), verbo)
 }
 
 func newDashboardCmd(res func() (config.Config, string, error)) *cobra.Command {

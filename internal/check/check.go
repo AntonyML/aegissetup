@@ -42,7 +42,7 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 		out = append(out, Result{"TCP " + cfg.Server, true, "puerto abierto"})
 	}
 
-	dsn := buildConn(cfg, appPass)
+	dsn := setup.AppDSN(cfg, appPass)
 	db, err := sql.Open("sqlserver", dsn)
 	if err != nil {
 		out = append(out, Result{"SQL open", false, err.Error()})
@@ -88,13 +88,4 @@ func allOK(rs []Result) bool {
 		}
 	}
 	return true
-}
-
-func buildConn(cfg config.Config, appPass string) string {
-	srv := strings.Replace(cfg.Server, ",", ":", 1)
-	if cfg.UseWinAuth || appPass == "" {
-		return fmt.Sprintf("sqlserver://%s?database=%s&dial+timeout=10&encrypt=disable&trusted+connection=yes", srv, cfg.Database)
-	}
-	u := strings.NewReplacer(":", "%3A", "@", "%3A", "/", "%2F", "?", "%3F", "#", "%23", " ", "%20", "*", "%2A").Replace(appPass)
-	return fmt.Sprintf("sqlserver://%s:%s@%s?database=%s&dial+timeout=10&encrypt=disable", cfg.SQLUser, u, srv, cfg.Database)
 }

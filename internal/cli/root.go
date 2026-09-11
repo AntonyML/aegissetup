@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"aegis-setup/internal/config"
+	"aegis-setup/internal/precheck"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -23,6 +24,11 @@ const (
 var (
 	ErrConfig = errors.New("error de configuración")
 	ErrNoTTY  = errors.New("se requiere un subcomando explícito en entornos no interactivos")
+	// ErrCheckFail marca que el diagnóstico corrió bien y encontró fallas. Es
+	// distinto de un error de configuración (2) o de un problema del propio Aegis
+	// (1): así un script puede distinguir "esta máquina no está lista" de
+	// "Aegis se rompió", que se arreglan de maneras opuestas.
+	ErrCheckFail = errors.New("la máquina no está lista")
 )
 
 var isTerminal = func(f *os.File) bool {
@@ -50,7 +56,9 @@ Subcomandos:
   setup-db   Restaura el .bak como SIDC, compat, collation, logins.
   setup-app  DSN SIDC_SQL 32-bit + OCX legacy + verifica exe/reportes + parche _DOCKER.
   check      Verifica que App y DB se hablan (TCP + SQL + DSN + ficheros).
-  dashboard  Panel de estado no interactivo.
+  checklist  Requisitos de la máquina en orden: qué falta, por qué y qué lo traba.
+             Sale con código 3 si algo traba la instalación, y 0 si no traba nada.
+  dashboard  Panel de estado no interactivo (para pegar en un correo de soporte).
   menu       Menú interactivo (0=instalación completa, 1=db, 2=app, 3=check, 4-6=presets).
   configure  Genera config.json inicial.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -75,6 +83,9 @@ Subcomandos:
 	cmd.AddCommand(newCheckCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}))
+	cmd.AddCommand(newChecklistCmd(func() (config.Config, string, error) {
+		return resolveCfg(exeDir, configPath, cfgLoader)
+	}, precheck.SondasReales))
 	cmd.AddCommand(newDashboardCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}))
@@ -134,8 +145,11 @@ func Execute() int {
 
 	cmd := NewRootCmd(dir, config.Load)
 	if err := cmd.Execute(); err != nil {
-		if errors.Is(err, ErrConfig) {
+		switch {
+		case errors.Is(err, ErrConfig):
 			return ExitConfigErr
+		case errors.Is(err, ErrCheckFail):
+			return ExitCheckFail
 		}
 		return ExitGeneralErr
 	}

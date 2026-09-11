@@ -106,16 +106,66 @@ func localStatNeeded(cfg config.Config, bakPath string) bool {
 	return !isEnginePath(cfg, bakPath)
 }
 
+// PuertoPorDefecto es el de SQL Server cuando el server no trae puerto. Es el mismo
+// que asume el driver, y tiene que seguir siéndolo: si acá dijéramos un puerto y el
+// driver usara otro, el checklist hablaría de un puerto y la conexión de otro.
+const PuertoPorDefecto = "1433"
+
+// HostPuerto convierte el "host,puerto" que usa ODBC al "host:puerto" que hablan la
+// red y los drivers.
+//
+// Tres casos, y los tres importan:
+//
+//   - "localhost,14333" -> "localhost:14333"
+//   - "localhost" o "CONTABILIDAD" -> le agrega :1433. Sin esto, net.Dial falla con
+//     "missing port in address" y una máquina sana queda en rojo.
+//   - "localhost\SQLEXPRESS" -> se deja tal cual. Una instancia con nombre negocia
+//     el puerto por SQL Browser; forzarle el 1433 la rompe.
+func HostPuerto(server string) string {
+	s := strings.Replace(server, ",", ":", 1)
+	if strings.Contains(s, "\\") || tienePuerto(s) {
+		return s
+	}
+	return s + ":" + PuertoPorDefecto
+}
+
+// tienePuerto distingue "localhost:1433" de "localhost". Un ':' seguido de algo que
+// no sea puerto no cuenta.
+func tienePuerto(s string) bool {
+	i := strings.LastIndex(s, ":")
+	if i < 0 || i == len(s)-1 {
+		return false
+	}
+	for _, c := range s[i+1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // adminDSN arma conexión SA/master contra el Server configurado.
 // ODBC usa "host,puerto" pero go-mssqldb exige "host:puerto".
 func adminDSN(cfg config.Config, saPass string) string {
-	srv := strings.Replace(cfg.Server, ",", ":", 1)
+	srv := HostPuerto(cfg.Server)
 	return fmt.Sprintf("sqlserver://sa:%s@%s?database=master&dial+timeout=15&encrypt=disable", urlEscape(saPass), srv)
 }
 
 func urlEscape(s string) string {
 	r := strings.NewReplacer(":", "%3A", "@", "%3A", "/", "%2F", "?", "%3F", "#", "%23", " ", "%20", "*", "%2A")
 	return r.Replace(s)
+}
+
+// AppDSN arma la conexión con la que la app (o el check) lee la base: login de
+// app en dev/docker, Windows Auth en prod. La comparten el check y el precheck
+// a propósito: si cada uno armara la suya, un cambio en uno solo haría que el
+// checklist y la verificación dijeran cosas distintas de la misma base.
+func AppDSN(cfg config.Config, appPass string) string {
+	srv := HostPuerto(cfg.Server)
+	if cfg.UseWinAuth || appPass == "" {
+		return fmt.Sprintf("sqlserver://%s?database=%s&dial+timeout=10&encrypt=disable&trusted+connection=yes", srv, cfg.Database)
+	}
+	return fmt.Sprintf("sqlserver://%s:%s@%s?database=%s&dial+timeout=10&encrypt=disable", cfg.SQLUser, urlEscape(appPass), srv, cfg.Database)
 }
 
 // SetupDB restaura el .bak más nuevo como cfg.Database, fija compat,

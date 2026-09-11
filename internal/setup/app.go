@@ -43,6 +43,27 @@ func CheckCrystal() []string {
 	return checkCrystalSys()
 }
 
+// CheckOCX reporta qué RequiredOCX faltan en SysWOW64. Ojo: es presencia del
+// archivo, no registro COM. Consultar el registro exigiría los GUID de cada
+// control, que no los tenemos; la presencia en SysWOW64 es el proxy que ya usa
+// el resto del diagnóstico.
+func CheckOCX() []string {
+	return checkOCXSys()
+}
+
+// FaltanOCXEn reporta qué RequiredOCX no están en dir, el origen desde donde
+// Setup App los copia a SysWOW64. Sirve para distinguir "falta registrarlos"
+// (se arregla solo) de "no hay de dónde copiarlos" (hay que traerlos).
+func FaltanOCXEn(dir string) []string {
+	var faltan []string
+	for _, f := range RequiredOCX {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			faltan = append(faltan, f)
+		}
+	}
+	return faltan
+}
+
 // CheckAppFiles verifica exe, reportes, fotos. No modifica nada.
 func CheckAppFiles(appDir string) []string {
 	var missing []string
