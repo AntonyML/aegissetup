@@ -399,6 +399,12 @@ func (m Model) viewMenu() string {
 
 func (m Model) viewAsk() string {
 	s := m.styles
+	if len(m.askQueue) == 0 {
+		// No deberia pasar (la pantalla se activa solo con claves faltantes),
+		// pero un index out of range aca corta la instalacion en la cara del
+		// operador, a mitad de camino. Mejor mostrar el menú.
+		return m.viewMenu()
+	}
 	name := m.askQueue[0]
 	var b strings.Builder
 	b.WriteString(s.AppTitle.Render(stepTitle(taskInstall)) + "\n\n")
