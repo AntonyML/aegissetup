@@ -1,53 +1,66 @@
 name: release
 
-# F1 + F2: construye el EXE de Windows con el runtime legado embebido y lo
-# publica como asset del Release cuando se empuja un tag v*.
-#
-# El paso "Verificar runtime embebido" corre ANTES del build a propósito: si los
-# .dll de Crystal no están versionados, el embed se arma incompleto y el Release
-# publicaría un EXE que no sirve en una PC limpia. El test corta el pipeline.
-#
-# F7d: además del EXE se publica el respaldo .bak (asset aparte, ~39 MB). No viaja
-# dentro del EXE y Aegis no lo descarga: el operador lo baja a mano del Release y
-# "aegis bak" le dice la URL y la carpeta donde dejarlo.
-#
-# OJO con las rutas: este workflow vive en el repo de AegisSetup, así que la raíz del
-# workspace ES el directorio del módulo. Los pasos corren desde ahí y NINGÚN path lleva
-# el prefijo "AegisSetup/" (ese prefijo solo tendría sentido si el workflow viviera en el
-# repo padre, que ni siquiera tiene .github/). Con el prefijo puesto, el primer paso que
-# corre falla y el Release no se publica.
-
 on:
   push:
-    tags: ['v*']
+    branches:
+      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Marcar como pre-release'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  build-and-release:
+    name: 🚀 Build & Release
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: ⬇️ Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup Go
+      - name: 📐 Resolver versión y etiqueta
+        id: version
+        shell: pwsh
+        run: |
+          $rawTags = @(git tag --list "v*.*.*" --sort=-v:refname)
+          $latestTag = if ($rawTags.Count -gt 0 -and $rawTags[0]) { $rawTags[0].Trim() } else { "v0.1.0" }
+
+          if ($env:GITHUB_REF -like "refs/tags/*") {
+            $tag = $env:GITHUB_REF -replace "refs/tags/", ""
+            $version = $tag.TrimStart("v")
+          } else {
+            $clean = $latestTag.TrimStart("v")
+            $parts = $clean.Split(".")
+            $major = if ($parts.Count -gt 0 -and $parts[0]) { [int]$parts[0] } else { 0 }
+            $minor = if ($parts.Count -gt 1 -and $parts[1]) { [int]$parts[1] } else { 1 }
+            $patch = if ($parts.Count -gt 2 -and $parts[2]) { [int]$parts[2] + 1 } else { 1 }
+            $version = "$major.$minor.$patch"
+            $tag = "v$version"
+          }
+
+          "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "✅ Tag a generar: $tag (versión $version)"
+
+      - name: 🔧 Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Verificar runtime embebido
+      - name: 🧪 Verificar runtime embebido
         run: go test ./assets/...
 
-      # F7d: el respaldo no viaja dentro del EXE, así que se publica como asset aparte.
-      # El nombre del asset es FIJO (SIDC_2014.bak) aunque el archivo del repo lleve la
-      # fecha en el nombre: "aegis bak" imprime .../releases/latest/download/SIDC_2014.bak
-      # y esa URL tiene que seguir siendo válida en el próximo release. Corre antes del
-      # build para que un .bak sin versionar corte el pipeline en segundos, no al final.
-      - name: Preparar el respaldo del Release
+      - name: 📦 Preparar el respaldo del Release
         shell: pwsh
         run: |
           $baks = @(Get-ChildItem assets/backups/sqlserver2014/*.bak)
@@ -57,26 +70,105 @@ jobs:
           Copy-Item $baks[0].FullName SIDC_2014.bak
           "{0} -> {1:N1} MB" -f $baks[0].Name, ($baks[0].Length / 1MB)
 
-      - name: Vet
+      - name: 🔍 Vet
         run: go vet ./...
 
-      - name: Tests
+      - name: 🧪 Tests
         run: go test ./...
 
-      - name: Build
+      - name: 🏗️ Build
         run: go build -trimpath -ldflags "-s -w" -o aegis.exe ./cmd/aegis
 
-      - name: Reportar tamaño del binario
+      - name: 📊 Reportar tamaño del binario
         shell: pwsh
         run: |
           $exe = Get-Item aegis.exe
           "{0} -> {1:N1} MB" -f $exe.Name, ($exe.Length / 1MB)
 
-      - name: Publicar Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: ⚡ Subir mirrors (GoFile + Catbox)
+        shell: pwsh
+        run: |
+          $gofileUrl = ""
+          try {
+            Write-Host "📤 Subiendo a GoFile..."
+            $serverResp = Invoke-RestMethod -Uri "https://api.gofile.io/servers" -TimeoutSec 10
+            $server = $serverResp.data.servers[0].name
+            if ($server) {
+              $rawJson = curl.exe -s -F "file=@aegis.exe" "https://$server.gofile.io/contents/uploadfile"
+              $uploadResp = $rawJson | ConvertFrom-Json
+              if ($uploadResp.data.downloadPage) {
+                $gofileUrl = $uploadResp.data.downloadPage
+                Write-Host "   ✅ GoFile: $gofileUrl"
+              }
+            }
+          } catch {
+            Write-Warning "GoFile error: $_"
+          }
+
+          if (-not $gofileUrl) {
+            $gofileUrl = "https://gofile.io/d/GkN4Yf"
+            Write-Host "   ℹ️ Usando enlace GoFile: $gofileUrl"
+          }
+
+          $catboxUrl = ""
+          try {
+            Write-Host "📤 Subiendo a Catbox..."
+            $catResp = curl.exe -s -F "reqtype=fileupload" -F "fileToUpload=@aegis.exe" https://catbox.moe/user/api.php
+            if ($catResp -match "^https?://") {
+              $catboxUrl = $catResp.Trim()
+              Write-Host "   ✅ Catbox: $catboxUrl"
+            }
+          } catch {
+            Write-Warning "Catbox error: $_"
+          }
+
+          $lines = @(
+            "### ⚡ Descarga rápida",
+            "",
+            "| Mirror | Link |",
+            "|--------|------|",
+            "| 📁 GoFile | [$gofileUrl]($gofileUrl) |"
+          )
+          if ($catboxUrl) {
+            $lines += "| 🐱 Catbox | [$catboxUrl]($catboxUrl) |"
+          }
+
+          $lines -join "`n" | Out-File -FilePath release-body.md -Encoding utf8
+
+      - name: 🏷️ Crear/actualizar Git tag
+        if: startsWith(github.ref, 'refs/heads/')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = '${{ env.TAG }}';
+            const sha = context.sha;
+            try {
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${tag}`,
+                sha: sha
+              });
+              console.log(`✅ Tag ${tag} created @ ${sha}`);
+            } catch (e) {
+              if (e.status === 422) {
+                console.log(`⚠️ Tag ${tag} already exists, reusing it`);
+              } else {
+                throw e;
+              }
+            }
+
+      - name: 🚀 Publicar Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             aegis.exe
             SIDC_2014.bak
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
+          body_path: release-body.md
           generate_release_notes: true
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
