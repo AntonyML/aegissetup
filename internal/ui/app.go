@@ -65,6 +65,10 @@ type Model struct {
 	askQueue []string
 	askInput textinput.Model
 	askErr   string
+	// presetServer es el server del preset "prod server" vía flag --server.
+	// Vacío = comportamiento por defecto (CONTABILIDAD si la config actual
+	// apunta a localhost, o la config que ya hubiera).
+	presetServer string
 }
 
 var menuItems = []menuEntry{
@@ -84,6 +88,13 @@ func NewModel(cfg config.Config, cfgPath string) Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = styles.Spinner
 	return Model{cfg: cfg, cfgPath: cfgPath, styles: styles, spinner: sp, secrets: map[string]string{}}
+}
+
+// SetPresetServer fija el server del preset "prod server" (flag --server del
+// CLI). Devuelve una copia con el valor puesto; no muta el original.
+func (m Model) SetPresetServer(s string) Model {
+	m.presetServer = s
+	return m
 }
 
 func (m Model) Init() tea.Cmd { return nil }
@@ -229,12 +240,25 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 	case actCheck:
 		return m.startTask(taskCheck, stepTitle(taskCheck))
 	case actPresetDev, actPresetProdLocal, actPresetProdServer:
-		lines, err := m.applyPreset(a)
+		cfg, err := presetConfig(m.cfg, a, m.presetServer)
 		m.screen = screenDone
-		m.lines = lines
-		m.taskErr = err
 		m.task = taskNone
 		m.taskName = "PRESET"
+		if err != nil {
+			m.taskErr = err
+			m.lines = nil
+			return m, nil
+		}
+		if err := cfg.Save(m.cfgPath); err != nil {
+			m.taskErr = err
+			m.lines = nil
+			return m, nil
+		}
+		// El preset actualiza la config en memoria además de guardarla: si no,
+		// una instalación completa lanzada justo después correría con la
+		// config vieja.
+		m.cfg = cfg
+		m.lines = []string{fmt.Sprintf("config guardada: env=%s db_mode=%s server=%s", cfg.Env, cfg.DbMode, cfg.Server)}
 		return m, nil
 	}
 	return m, nil
@@ -332,8 +356,11 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 	return nil
 }
 
-func (m Model) applyPreset(a action) ([]string, error) {
-	cfg := m.cfg
+// presetConfig calcula la config que deja un preset, sin tocar disco. El
+// presetServer viene del flag --server y solo aplica al preset "prod server":
+// deja elegir el servidor sin editar config.json a mano. Vacío = CONTABILIDAD
+// si la config actual todavía apunta a localhost (dev), o la que ya hubiera.
+func presetConfig(cfg config.Config, a action, presetServer string) (config.Config, error) {
 	switch a {
 	case actPresetDev:
 		cfg.Env, cfg.DbMode, cfg.Server = "dev", config.DbDocker, "localhost,14333"
@@ -343,19 +370,17 @@ func (m Model) applyPreset(a action) ([]string, error) {
 		cfg.UseWinAuth, cfg.Driver = true, "SQL Server"
 	case actPresetProdServer:
 		cfg.Env, cfg.DbMode = "prod", config.DbServer
-		if cfg.Server == "localhost,14333" || cfg.Server == "localhost" {
+		if presetServer != "" {
+			cfg.Server = presetServer
+		} else if cfg.Server == "localhost,14333" || cfg.Server == "localhost" {
 			cfg.Server = "CONTABILIDAD"
 		}
 		cfg.UseWinAuth, cfg.Driver = true, "SQL Server"
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return config.Config{}, err
 	}
-	if err := cfg.Save(m.cfgPath); err != nil {
-		return nil, err
-	}
-	m.cfg = cfg
-	return []string{fmt.Sprintf("config guardada: env=%s db_mode=%s server=%s", cfg.Env, cfg.DbMode, cfg.Server)}, nil
+	return cfg, nil
 }
 
 func (m Model) View() tea.View {
@@ -453,6 +478,7 @@ func renderHelp(s Styles) string {
 		"Flujo por PC: 0 Instalación completa (db -> app -> check), o 1, 2 y 3 por separado.\n\n" +
 		"- dev docker: SQL Auth con AEGIS_SQL_PASSWORD. El TUI guarda PWD y genera _DOCKER.exe solo.\n" +
 		"- prod local/server: Windows Auth como CONTABILIDAD. Nunca guarda PWD ni pide claves.\n" +
+		"- Preset prod server: CONTABILIDAD por defecto; `aegis --server MI_SERVIDOR` lo cambia sin editar config.\n" +
 		"- Claves por entorno o pedidas al inicio, jamas en config.json.\n\n" +
 		"Drops manuales (tu los pones):\n\n" +
 		"- assets/backups/sqlserver2014/ -> el .bak de SIDC (SQL 2014).\n" +

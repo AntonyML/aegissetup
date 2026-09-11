@@ -143,13 +143,13 @@ func newDashboardCmd(res func() (config.Config, string, error)) *cobra.Command {
 	return cmd
 }
 
-func newMenuCmd(res func() (config.Config, string, error)) *cobra.Command {
+func newMenuCmd(res func() (config.Config, string, error), presetServer func() string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "menu",
 		Short: "Menú interactivo (0=instalación completa 1=db 2=app 3=check 4-6=presets)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, path, err := res()
-			return runMenu(cmd, cfg, path, err)
+			return runMenu(cmd, cfg, path, err, presetServer())
 		},
 	}
 }

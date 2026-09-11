@@ -12,15 +12,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// runMenu abre el TUI Bubble Tea que EJECUTA el flujo (1=db 2=app 3=check).
-func runMenu(cmd *cobra.Command, cfg config.Config, path string, err error) error {
+// runMenu abre el TUI Bubble Tea que EJECUTA el flujo (0=instalación completa,
+// 1=db 2=app 3=check 4-6=presets). presetServer viene del flag --server y solo
+// afecta al preset "prod server".
+func runMenu(cmd *cobra.Command, cfg config.Config, path string, err error, presetServer string) error {
 	if err != nil {
 		return err
 	}
-	return runTUI(cmd.Context(), cfg, path, cmd.InOrStdin(), cmd.OutOrStdout())
+	return runTUI(cmd.Context(), cfg, path, presetServer, cmd.InOrStdin(), cmd.OutOrStdout())
 }
 
-func runTUI(ctx context.Context, cfg config.Config, path string, in io.Reader, out io.Writer) error {
+func runTUI(ctx context.Context, cfg config.Config, path string, presetServer string, in io.Reader, out io.Writer) error {
 	var opts []tea.ProgramOption
 	if in != nil {
 		opts = append(opts, tea.WithInput(in))
@@ -31,7 +33,7 @@ func runTUI(ctx context.Context, cfg config.Config, path string, in io.Reader, o
 	if ctx != nil {
 		opts = append(opts, tea.WithContext(ctx))
 	}
-	p := tea.NewProgram(ui.NewModel(cfg, path), opts...)
+	p := tea.NewProgram(ui.NewModel(cfg, path).SetPresetServer(presetServer), opts...)
 	_, err := p.Run()
 	return err
 }

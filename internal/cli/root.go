@@ -35,6 +35,7 @@ var isTerminal = func(f *os.File) bool {
 // NewRootCmd crea el comando raíz y registra setup-db, setup-app, check, dashboard, menu, configure.
 func NewRootCmd(exeDir string, cfgLoader func(cfgPath string) (config.Config, error)) *cobra.Command {
 	var configPath string
+	var presetServer string
 
 	cmd := &cobra.Command{
 		Use:   "aegis",
@@ -55,7 +56,7 @@ Subcomandos:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if isTerminal(os.Stdin) {
 				cfg, path, err := resolveCfg(exeDir, configPath, cfgLoader)
-				return runMenu(cmd, cfg, path, err)
+				return runMenu(cmd, cfg, path, err, presetServer)
 			}
 			_ = cmd.Help()
 			return ErrNoTTY
@@ -63,6 +64,7 @@ Subcomandos:
 	}
 
 	cmd.PersistentFlags().StringVar(&configPath, "config", "", "ruta a config.json (default: config.json junto al binario)")
+	cmd.PersistentFlags().StringVar(&presetServer, "server", "", "server para el preset 'prod server' del TUI (ej. aegis --server MI_SERVIDOR)")
 
 	cmd.AddCommand(newSetupDbCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
@@ -78,7 +80,7 @@ Subcomandos:
 	}))
 	cmd.AddCommand(newMenuCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
-	}))
+	}, func() string { return presetServer }))
 	cmd.AddCommand(newConfigureCmd(exeDir))
 
 	return cmd
