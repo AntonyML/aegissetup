@@ -22,6 +22,7 @@ terminada la instalación.
 ## Características
 
 - **Instalación desatendida** — un solo comando restaura la base, deja el entorno listo y verifica el resultado.
+- **Perfil por máquina** — la primera vez pregunta en qué PC está corriendo y lo guarda; el resto de las corridas ya no pregunta.
 - **Multi-entorno con un mismo binario** — `dev` (Docker), `prod local`, `prod server`, sin recompilar la app.
 - **Redirección por DSN** — el DSN es el único punto de conexión: cambiarlo apunta a otro servidor sin tocar el `.exe`.
 - **TUI interactivo** — menú Bubble Tea que **ejecuta** el flujo (no solo lo documenta).
@@ -45,7 +46,9 @@ cd AegisSetup
 go build -o bin/aegis.exe ./cmd/aegis
 ```
 
-El binario queda en `bin/aegis.exe` y lee `config.json` **junto a él** (o la ruta que le pases con `--config`).
+El binario queda en `bin/aegis.exe`. La configuración vive en
+`%APPDATA%\AegisSetup\config.json` (o la que le pases con `--config`). Un `config.json`
+viejo junto al binario se sigue leyendo si el canónico todavía no existe.
 
 ## Uso
 
@@ -62,6 +65,34 @@ El binario queda en `bin/aegis.exe` y lee `config.json` **junto a él** (o la ru
 | `configure` | Genera el `config.json` inicial. |
 
 Sin subcomando, `aegis` abre directamente la TUI (si hay terminal interactiva).
+
+### Primera vez: el perfil de la máquina
+
+Si no hay `config.json`, la TUI **no** abre el menú: lo primero que pregunta es en qué PC
+está corriendo. La elección se guarda y no se vuelve a preguntar.
+
+```text
+AEGIS SETUP
+Todavía no hay config en esta PC: decime en qué PC estamos.
+
+ESTA PC ES...
+> [1] Pruebas - SQL Server 2019 en Docker, en esta misma PC
+  [2] Producción en esta PC - SIDC y SQL Server locales, Windows Auth
+  [3] Producción en un servidor - SQL Server en otra PC de la red
+```
+
+Los tres son **las mismas acciones** que los presets `4`/`5`/`6` del menú: la misma
+decisión, tomada en dos momentos distintos. Elegir el perfil escribe el `config.json` y
+**recalcula el checklist** contra el ambiente nuevo —los requisitos de Docker no aplican en
+la PC de producción, y quedarse con la medición anterior trabaría el menú con requisitos del
+ambiente que se acaba de abandonar.
+
+Si elegís *Producción en un servidor*, el TUI pregunta el nombre del servidor en vez de
+adivinar `CONTABILIDAD`: un nombre inventado se ve igual de válido que uno real hasta que
+falla la conexión. Con `--server X` no pregunta (camino no interactivo).
+
+`Esc`/`Q` en esa pantalla sale sin escribir nada. Lo que no hace es seguir al menú con el
+perfil `dev` por defecto: ese era justamente el problema.
 
 ### Checklist y desbloqueo progresivo
 
@@ -154,6 +185,9 @@ docker compose -f docker/docker-compose.yml up -d   # 3. base dev (SQL 2019, com
 ./bin/aegis menu                                     # o todo de un tirón desde la TUI
 ```
 
+En una PC nueva, `./bin/aegis menu` es el primer paso real: pregunta el perfil, lo guarda y
+de ahí en adelante todo lo demás usa esa configuración.
+
 > Corré la terminal **como Administrador**: el DSN (`HKLM`) y los OCX (`SysWOW64`) lo exigen.
 
 ## Configuración
@@ -223,7 +257,11 @@ La config también se resuelve en orden: `--config` → `%APPDATA%\AegisSetup\co
 | --- | --- | --- |
 | `4` | dev | `dev` + `docker` + `localhost,14333` |
 | `5` | prod local | `prod` + `local` + `localhost` + Windows Auth |
-| `6` | prod server | `prod` + `server` + `CONTABILIDAD` (o `--server X`) + Windows Auth |
+| `6` | prod server | `prod` + `server` + el nombre que le digas (o `--server X`) + Windows Auth |
+
+El `6` pregunta el nombre del servidor si no viene por `--server`. Cambiar de preset cambia
+la config **y** vuelve a medir la máquina: lo que traba se recalcula contra el ambiente
+nuevo, no contra el anterior.
 
 ## Secretos
 
@@ -307,8 +345,10 @@ gofmt -l .      # formatting
 
 ## Estado
 
-Instalador funcional de punta a punta en dev. Pendiente: instalación automática de Crystal
-con elevación, descarga del `.bak`, desinstalación limpia y validación en una PC limpia.
+Instalador funcional de punta a punta en dev. Hecho: CI + releases, runtime embebido, rutas
+machine-wide, checklist-puerta y perfil por máquina al arrancar. Pendiente: instalación
+automática de Crystal con elevación, descarga del `.bak`, desinstalación limpia y validación
+en una PC limpia.
 
 ## Licencia
 

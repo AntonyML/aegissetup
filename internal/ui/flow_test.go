@@ -181,7 +181,7 @@ func TestViewAskSinColaNoPaniquea(t *testing.T) {
 
 // Cualquier pantalla del TUI tiene que poder dibujarse.
 func TestTodasLasPantallasSeDibujan(t *testing.T) {
-	for _, s := range []screen{screenMenu, screenWorking, screenDone, screenAsk, screenChecklist} {
+	for _, s := range []screen{screenMenu, screenWorking, screenDone, screenAsk, screenChecklist, screenPerfil, screenServer} {
 		m := NewModel(devCfg(), "")
 		m.screen = s
 		if s == screenAsk {

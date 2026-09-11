@@ -28,6 +28,10 @@ const (
 	screenHelp
 	screenAsk
 	screenChecklist
+	// screenPerfil es la primera pantalla cuando todavía no hay config: en qué PC
+	// estamos. Va antes del menú porque el menú ya asume un ambiente.
+	screenPerfil
+	screenServer
 )
 
 type taskKind int
@@ -83,6 +87,15 @@ type Model struct {
 	// reacciona distinto a cada uno y la pantalla no debería decir "error"
 	// cuando la puerta hizo su trabajo.
 	bloqueo bool
+	// primeraVez es "no hay config.json todavía". Mientras sea true no se mide
+	// nada: sin perfil elegido, el checklist mide el ambiente por defecto, que no
+	// es el de esta PC.
+	primeraVez bool
+	// srvInput y srvErr son el prompt del nombre del servidor en prod server.
+	// Campo propio y no el de las claves: uno se muestra y el otro no, y eso
+	// tiene que ser propiedad del campo, no de por dónde pasó el flujo.
+	srvInput textinput.Model
+	srvErr   string
 }
 
 var menuItems = []menuEntry{
@@ -93,6 +106,16 @@ var menuItems = []menuEntry{
 	{"4", "Preset dev", "config dev docker localhost,14333", actPresetDev},
 	{"5", "Preset prod local", "config prod misma PC, Windows Auth", actPresetProdLocal},
 	{"6", "Preset prod server", "config prod servidor xxxx, Windows Auth", actPresetProdServer},
+}
+
+// perfiles es la primera pregunta en una PC sin config: en qué PC estamos. Son las
+// MISMAS acciones que los presets del menú (4/5/6) a propósito. Es la misma decisión
+// tomada en dos momentos distintos, y con listas separadas el día que cambie una
+// regla de ambiente el arranque y el menú dejarían configs distintas.
+var perfiles = []menuEntry{
+	{"1", "Pruebas", "SQL Server 2019 en Docker, en esta misma PC", actPresetDev},
+	{"2", "Producción en esta PC", "SIDC y SQL Server locales, Windows Auth", actPresetProdLocal},
+	{"3", "Producción en un servidor", "SQL Server en otra PC de la red", actPresetProdServer},
 }
 
 // NewModel crea el modelo TUI con la config cargada.
@@ -111,9 +134,28 @@ func (m Model) SetPresetServer(s string) Model {
 	return m
 }
 
+// SetPrimeraVez marca que no hay config todavía, así que lo primero es preguntar en
+// qué PC estamos. Lo decide el CLI, que es quien sabe si el archivo existe: el
+// modelo no toca el disco.
+func (m Model) SetPrimeraVez(v bool) Model {
+	m.primeraVez = v
+	if v {
+		m.screen = screenPerfil
+		m.cursor = 0
+	}
+	return m
+}
+
 type checksMsg struct{ rs []precheck.Requisito }
 
-func (m Model) Init() tea.Cmd { return m.runChecks() }
+func (m Model) Init() tea.Cmd {
+	// Sin perfil elegido no hay nada que medir: el checklist del ambiente por
+	// defecto diría "Docker en marcha" en la PC de FEMUCARIBE, que no usa Docker.
+	if m.primeraVez {
+		return nil
+	}
+	return m.runChecks()
+}
 
 // runChecks evalúa el checklist en background. El timeout de cada sonda lo pone
 // la sonda misma, así que acá no hace falta un contexto.
@@ -155,6 +197,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		switch m.screen {
+		case screenPerfil:
+			return m.updatePerfil(msg)
+		case screenServer:
+			return m.updateServer(msg)
 		case screenMenu:
 			switch msg.String() {
 			case "up", "k":
@@ -190,10 +236,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateAsk(msg)
 		case screenDone, screenHelp, screenChecklist:
 			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "q" || msg.String() == "c" {
-				m.screen = screenMenu
 				m.lines = nil
 				m.taskErr = nil
 				m.bloqueo = false
+				// Si el perfil nunca se pudo guardar, volver al menú sería arrancar
+				// con el ambiente por defecto sin que nadie lo haya elegido: se
+				// vuelve a preguntar.
+				if m.primeraVez {
+					m.screen = screenPerfil
+					m.cursor = 0
+					return m, nil
+				}
+				m.screen = screenMenu
 				return m, nil
 			}
 			return m, nil
@@ -202,6 +256,159 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// updatePerfil maneja la primera pantalla: en qué PC estamos. Acá no hay puerta ni
+// checklist porque todavía no hay ambiente contra el cual medir.
+func (m Model) updatePerfil(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.cursor < len(perfiles)-1 {
+			m.cursor++
+		}
+		return m, nil
+	case "enter":
+		return m.elegirPerfil(perfiles[m.cursor])
+	case "q", "Q", "esc":
+		// Salir sin elegir es válido; lo que no es válido es seguir al menú con
+		// el perfil dev por defecto, que es el bug que esta pantalla arregla.
+		return m, tea.Quit
+	}
+	for _, p := range perfiles {
+		if msg.String() == p.key {
+			m.cursor = indexDePerfil(p.action)
+			return m.elegirPerfil(p)
+		}
+	}
+	return m, nil
+}
+
+func indexDePerfil(a action) int {
+	for i, p := range perfiles {
+		if p.action == a {
+			return i
+		}
+	}
+	return 0
+}
+
+// elegirPerfil aplica el perfil elegido. Prod server primero pregunta el nombre: un
+// nombre inventado manda al operador a un "motor no alcanzable" que no describe su
+// problema, y encima queda escrito en el config.
+func (m Model) elegirPerfil(p menuEntry) (tea.Model, tea.Cmd) {
+	if p.action == actPresetProdServer && m.presetServer == "" {
+		m.srvInput = newServerInput(m.sugerenciaServer())
+		m.srvErr = ""
+		m.screen = screenServer
+		return m, nil
+	}
+	// presetServer es el flag --server: cuando viene, el nombre ya está dicho y no
+	// hay nada que preguntar (camino no interactivo).
+	return m.aplicarPerfil(p.action, m.presetServer)
+}
+
+// sugerenciaServer es lo único que podemos ofrecer como ejemplo. No se precarga en
+// el campo a propósito: un valor precargado se guarda tal cual sin que el operador
+// lo lea, que es exactamente cómo se cuela un CONTABILIDAD equivocado.
+func (m Model) sugerenciaServer() string {
+	if m.presetServer != "" {
+		return m.presetServer
+	}
+	s := m.cfg.Server
+	if s == "" || strings.HasPrefix(s, "localhost") || strings.HasPrefix(s, ".") || s == "127.0.0.1" {
+		return "CONTABILIDAD"
+	}
+	return s
+}
+
+func newServerInput(sugerencia string) textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = sugerencia
+	ti.Prompt = "> "
+	// Width explícito: un textinput sin ancho dibuja solo el cursor y el operador
+	// no ve lo que escribe ni el ejemplo de la sugerencia.
+	ti.SetWidth(40)
+	ti.CharLimit = 128
+	ti.Focus()
+	return ti
+}
+
+func (m Model) updateServer(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Vuelve a preguntar qué PC es: si venía del arranque, el perfil sigue sin
+		// elegir y no se puede caer al menú.
+		m.srvErr = ""
+		if m.primeraVez {
+			m.screen = screenPerfil
+			return m, nil
+		}
+		m.screen = screenMenu
+		return m, nil
+	case "enter":
+		server := strings.TrimSpace(m.srvInput.Value())
+		if server == "" {
+			m.srvErr = "Poné el nombre del servidor (ej. CONTABILIDAD, SIDC01 o CONTABILIDAD\\SQLEXPRESS)."
+			return m, nil
+		}
+		return m.aplicarPerfil(actPresetProdServer, server)
+	}
+	var cmd tea.Cmd
+	m.srvInput, cmd = m.srvInput.Update(msg)
+	return m, cmd
+}
+
+// aplicarPerfil guarda la config y RECALCULA el checklist. Lo segundo no es un
+// adorno: el checklist viejo describe la máquina según el ambiente anterior, así que
+// conservarlo dejaría al operador trabado por requisitos del ambiente que acaba de
+// abandonar (Docker, por ejemplo, en una PC de producción).
+func (m Model) aplicarPerfil(a action, server string) (tea.Model, tea.Cmd) {
+	cfg, err := presetConfig(m.cfg, a, server)
+	if err != nil {
+		return m.errorDePerfil(err)
+	}
+	if err := cfg.Save(m.cfgPath); err != nil {
+		return m.errorDePerfil(err)
+	}
+	m.cfg = cfg
+	m.primeraVez = false
+	m.srvErr = ""
+	m.bloqueo = false
+	m.taskErr = nil
+	m.task = taskNone
+	m.taskName = "PERFIL"
+	m.screen = screenDone
+	m.cursor = 0
+	m.lines = []string{
+		fmt.Sprintf("config guardada en %s", m.cfgPath),
+		fmt.Sprintf("env=%s db_mode=%s server=%s auth=%s", cfg.Env, cfg.DbMode, cfg.Server, authLabel(cfg)),
+		"",
+		"Ya está midiendo esta config: mirá el checklist con [C].",
+	}
+	m.checks = nil
+	m.verificando = true
+	return m, m.runChecks()
+}
+
+func (m Model) errorDePerfil(err error) (tea.Model, tea.Cmd) {
+	m.screen = screenDone
+	m.task = taskNone
+	m.taskName = "PERFIL"
+	m.taskErr = err
+	m.lines = nil
+	return m, nil
+}
+
+func authLabel(cfg config.Config) string {
+	if cfg.UseWinAuth {
+		return "Windows Auth"
+	}
+	return "SQL Auth (" + cfg.SQLUser + ")"
 }
 
 // updateAsk maneja el prompt de claves: una por vez, sin eco, con validación
@@ -289,26 +496,16 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 	case actCheck:
 		return m.startTask(taskCheck, stepTitle(taskCheck))
 	case actPresetDev, actPresetProdLocal, actPresetProdServer:
-		cfg, err := presetConfig(m.cfg, a, m.presetServer)
-		m.screen = screenDone
-		m.task = taskNone
-		m.taskName = "PRESET"
-		if err != nil {
-			m.taskErr = err
-			m.lines = nil
+		// Prod server sin --server pregunta el nombre en vez de escribir
+		// CONTABILIDAD: un servidor adivinado se ve igual de válido que uno real
+		// hasta que falla la conexión.
+		if a == actPresetProdServer && m.presetServer == "" {
+			m.srvInput = newServerInput(m.sugerenciaServer())
+			m.srvErr = ""
+			m.screen = screenServer
 			return m, nil
 		}
-		if err := cfg.Save(m.cfgPath); err != nil {
-			m.taskErr = err
-			m.lines = nil
-			return m, nil
-		}
-		// El preset actualiza la config en memoria además de guardarla: si no,
-		// una instalación completa lanzada justo después correría con la
-		// config vieja.
-		m.cfg = cfg
-		m.lines = []string{fmt.Sprintf("config guardada: env=%s db_mode=%s server=%s", cfg.Env, cfg.DbMode, cfg.Server)}
-		return m, nil
+		return m.aplicarPerfil(a, m.presetServer)
 	}
 	return m, nil
 }
@@ -446,6 +643,10 @@ func (m Model) View() tea.View {
 		content = m.viewChecklist()
 	case screenAsk:
 		content = m.viewAsk()
+	case screenPerfil:
+		content = m.viewPerfil()
+	case screenServer:
+		content = m.viewServer()
 	default:
 		content = m.viewMenu()
 	}
@@ -552,6 +753,59 @@ func (m Model) viewChecklist() string {
 	return s.Box.Render(b.String())
 }
 
+// viewPerfil es la primera pantalla en una PC sin config. Explica la consecuencia
+// de cada opción, no la jerga: el operador sabe si esta PC es de pruebas o la de
+// producción; "db_mode=local" no le dice nada.
+func (m Model) viewPerfil() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("AEGIS SETUP") + "\n")
+	b.WriteString(s.Subtitle.Render("Todavía no hay config en esta PC: decime en qué PC estamos.") + "\n\n")
+	b.WriteString(s.SectionHeader.Render("ESTA PC ES...") + "\n")
+	for i, p := range perfiles {
+		cur := "  "
+		if m.cursor == i {
+			cur = s.Cursor.Render("> ")
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s %s\n", cur, s.Key.Render("["+p.key+"]"),
+			s.Value.Render(p.name), s.Muted.Render("- "+p.desc)))
+	}
+	b.WriteString("\n" + s.Muted.Render("Se guarda en ") + s.Value.Render(m.cfgPath) + s.Muted.Render(" y se puede cambiar después (presets 4-6).") + "\n")
+	b.WriteString("\n" + s.Muted.Render("En prod nunca se guardan claves: SIDC usa Windows Auth.") + "\n")
+	b.WriteString("\n" + s.HelpBar.Render(
+		s.Key.Render("[↑↓/Enter]")+s.Desc.Render(" elegir   ")+
+			s.Key.Render("[Q]"+s.Desc.Render(" salir"))))
+	return s.Box.Render(b.String())
+}
+
+// viewServer pide el nombre del servidor. El pedido trae el error típico a la
+// vista: acá es donde el operador escribe una instancia con nombre o un puerto y
+// conviene que sepa antes que el checklist no puede probarlos por TCP.
+func (m Model) viewServer() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("SERVIDOR DE PRODUCCIÓN") + "\n\n")
+	// Value y no Label: Label tiene Width(16) fijo y parte la pregunta en dos renglones.
+	b.WriteString(s.Value.Render("¿Nombre o IP del servidor?") + "\n\n")
+	b.WriteString("  " + m.srvInput.View() + "\n")
+	if m.srvErr != "" {
+		b.WriteString("\n" + s.Error.Render("✖ ") + s.Value.Render(m.srvErr) + "\n")
+	}
+	b.WriteString("\n" + s.SectionHeader.Render("EJEMPLOS") + "\n")
+	for _, e := range [][2]string{
+		{"SIDC01", "nombre de la PC donde está SQL Server"},
+		{"192.168.1.50", "por IP, si no resuelve por nombre"},
+		{`SIDC01\SQLEXPRESS`, "instancia con nombre (SQL Express)"},
+		{"SIDC01,1433", "puerto explícito, si no es el 1433"},
+	} {
+		b.WriteString("  " + s.Value.Render(e[0]) + "  " + s.Muted.Render(e[1]) + "\n")
+	}
+	b.WriteString("\n" + s.HelpBar.Render(
+		s.Key.Render("[Enter]")+s.Desc.Render(" aceptar   ")+
+			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
+	return s.Box.Render(b.String())
+}
+
 func (m Model) viewAsk() string {
 	s := m.styles
 	if len(m.askQueue) == 0 {
@@ -613,8 +867,12 @@ func renderHelp(s Styles) string {
 		"Flujo por PC: 0 Instalación completa (db -> app -> check), o 1, 2 y 3 por separado.\n\n" +
 		"- dev docker: SQL Auth con AEGIS_SQL_PASSWORD. El TUI guarda PWD y genera _DOCKER.exe solo.\n" +
 		"- prod local/server: Windows Auth como CONTABILIDAD. Nunca guarda PWD ni pide claves.\n" +
-		"- Preset prod server: CONTABILIDAD por defecto; `aegis --server MI_SERVIDOR` lo cambia sin editar config.\n" +
-		"- Claves por entorno o pedidas al inicio, jamas en config.json.\n\n" +
+		"- Preset prod server: si el server no viene por --server, el TUI pregunta el nombre.\n" +
+		"- Claves por entorno o pedidas al inicio, jamás en config.json.\n\n" +
+		"Primera vez:\n\n" +
+		"- Sin config.json el TUI pregunta en qué PC estamos: Pruebas (Docker), Producción en esta PC o Producción en un servidor.\n" +
+		"- Elige una vez y queda guardada; los presets 4-6 la cambian después.\n" +
+		"- Cambiar de perfil recalcula el checklist: los requisitos de Docker no aplican en la PC de producción.\n\n" +
 		"Drops manuales (tu los pones):\n\n" +
 		"- assets/backups/sqlserver2014/ -> el .bak de SIDC (SQL 2014).\n" +
 		"- assets/legacy/ocx/ -> los 11 OCX de la PC vieja.\n" +

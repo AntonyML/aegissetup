@@ -22,6 +22,11 @@ func runMenu(cmd *cobra.Command, cfg config.Config, path string, err error, pres
 	return runTUI(cmd.Context(), cfg, path, presetServer, cmd.InOrStdin(), cmd.OutOrStdout())
 }
 
+// primeraVez dice si hay que preguntar el perfil antes del menú. No hay config en
+// disco = todavía no está dicho en qué PC estamos. Lo mira el CLI y no el modelo
+// porque el que sabe de archivos es este lado.
+func primeraVez(path string) bool { return !existeArchivo(path) }
+
 func runTUI(ctx context.Context, cfg config.Config, path string, presetServer string, in io.Reader, out io.Writer) error {
 	var opts []tea.ProgramOption
 	if in != nil {
@@ -33,7 +38,10 @@ func runTUI(ctx context.Context, cfg config.Config, path string, presetServer st
 	if ctx != nil {
 		opts = append(opts, tea.WithContext(ctx))
 	}
-	p := tea.NewProgram(ui.NewModel(cfg, path).SetPresetServer(presetServer), opts...)
+	model := ui.NewModel(cfg, path).
+		SetPresetServer(presetServer).
+		SetPrimeraVez(primeraVez(path))
+	p := tea.NewProgram(model, opts...)
 	_, err := p.Run()
 	return err
 }

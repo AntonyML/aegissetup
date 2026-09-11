@@ -96,3 +96,21 @@ func TestResolveCfgCargaElPathElegido(t *testing.T) {
 		t.Errorf("el loader recibió %q pero resolveCfg devolvió %q", visto, path)
 	}
 }
+
+// El perfil se pregunta solo cuando no hay config. Con config ya está dicho en qué
+// PC estamos y volver a preguntar (o peor: reescribirla) sería perder lo que el
+// operador eligió.
+func TestPrimeraVezSoloSinConfig(t *testing.T) {
+	dir := t.TempDir()
+	falta := filepath.Join(dir, "config.json")
+	if !primeraVez(falta) {
+		t.Error("sin config en disco no dijo primera vez: el TUI abriría el menú con el perfil dev por defecto")
+	}
+
+	if err := os.WriteFile(falta, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if primeraVez(falta) {
+		t.Error("con config en disco volvió a decir primera vez")
+	}
+}
