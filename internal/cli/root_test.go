@@ -141,7 +141,7 @@ func stubAdmin(t *testing.T, admin, skip bool, code int, err error) *[]string {
 // otro usuario, un script).
 func TestSoloLosQueEscribenPidenElevacion(t *testing.T) {
 	escriben := map[string]bool{"setup-db": true, "setup-app": true}
-	for _, sub := range []string{"setup-db", "setup-app", "check", "checklist", "dashboard", "menu", "configure"} {
+	for _, sub := range []string{"setup-db", "setup-app", "check", "checklist", "bak", "dashboard", "menu", "configure"} {
 		if got, want := writesToSystem(sub), escriben[sub]; got != want {
 			t.Errorf("writesToSystem(%q) = %v, quiero %v", sub, got, want)
 		}

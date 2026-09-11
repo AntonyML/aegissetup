@@ -4,6 +4,7 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,5 +123,17 @@ func setModTime(t *testing.T, path string, when time.Time) {
 	t.Helper()
 	if err := os.Chtimes(path, when, when); err != nil {
 		t.Fatalf("fijando mtime de %s: %v", path, err)
+	}
+}
+
+// F7d: el respaldo se publica como asset del Release, así que el error no puede seguir
+// mandando a copiarlo "de la PC vieja" a mano: tiene que decir cómo conseguirlo.
+func TestElErrorDeRespaldoMandaAlRelease(t *testing.T) {
+	_, err := FindNewestBak(t.TempDir())
+	if err == nil {
+		t.Fatal("una carpeta vacía tiene que dar error")
+	}
+	if !strings.Contains(err.Error(), "aegis bak") {
+		t.Errorf("el error no dice cómo conseguir el respaldo: %v", err)
 	}
 }

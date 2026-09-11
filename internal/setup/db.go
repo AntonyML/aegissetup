@@ -33,7 +33,7 @@ func FindNewestBak(dir string) (string, error) {
 		}
 	}
 	if len(cands) == 0 {
-		return "", fmt.Errorf("no hay .bak en %s (deja ahí el respaldo de la PC vieja)", dir)
+		return "", fmt.Errorf("no hay .bak en %s (bajá el respaldo del Release y dejalo ahí: corré aegis bak)", dir)
 	}
 	sort.Slice(cands, func(i, j int) bool {
 		fi, _ := os.Stat(cands[i])
@@ -60,7 +60,7 @@ func FindNewestBakCfg(cfg config.Config) (string, error) {
 		}
 		sinRespaldo = append(sinRespaldo, dir)
 	}
-	return "", fmt.Errorf("no hay .bak en ninguna de estas carpetas: %s (dejá ahí el respaldo de la PC vieja)", strings.Join(sinRespaldo, ", "))
+	return "", fmt.Errorf("no hay .bak en ninguna de estas carpetas: %s (bajá el respaldo del Release y dejalo ahí: corré aegis bak)", strings.Join(sinRespaldo, ", "))
 }
 
 // exeDir devuelve la carpeta del binario. Se usa para reconocer el layout viejo

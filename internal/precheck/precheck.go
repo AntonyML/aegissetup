@@ -208,7 +208,7 @@ func Run(cfg config.Config, appPass string, s Sondas) []Requisito {
 	out = append(out, veredicto(ReqBackup, "Respaldo .bak disponible",
 		"Setup DB restaura este respaldo para crear la base "+cfg.Database+".",
 		errBak == nil, detalleDeError(bak, errBak),
-		"Dejá el .bak de SIDC en "+config.DirBackups()+" (o al lado del ejecutable)."))
+		"Bajá el .bak del Release (corré aegis bak: te dice la URL y la carpeta) y dejalo en "+config.DirBackups()+" (o al lado del ejecutable)."))
 
 	ok, det = s.Base(cfg, appPass)
 	out = append(out, veredicto(ReqBase, "Base "+cfg.Database+" en el motor",

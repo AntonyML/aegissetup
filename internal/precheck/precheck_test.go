@@ -515,3 +515,22 @@ func TestAppDirConfiguradoNombraLaCarpeta(t *testing.T) {
 		t.Errorf("el arreglo tiene que decir a dónde copiar, dice: %s", r.Arreglo)
 	}
 }
+
+// F7d: el respaldo dejo de ser un archivo que se copia "de la PC vieja" sin mas. Ahora
+// viaja como asset del Release, y el arreglo tiene que decir como conseguirlo o el
+// operador lee donde dejarlo pero no de donde sacarlo.
+func TestElArregloDelRespaldoDiceDeDondeBajarlo(t *testing.T) {
+	cfg := config.Default()
+	s := sondasOK()
+	s.Backup = func(config.Config) (string, error) { return "", errors.New("no hay .bak") }
+
+	r := buscar(t, Run(cfg, "", s), ReqBackup)
+	if r.Estado != EstadoFalta {
+		t.Fatalf("estado = %v, quiero EstadoFalta", r.Estado)
+	}
+	for _, esperado := range []string{"aegis bak", config.DirBackups()} {
+		if !strings.Contains(r.Arreglo, esperado) {
+			t.Errorf("el arreglo no nombra %q: %s", esperado, r.Arreglo)
+		}
+	}
+}
