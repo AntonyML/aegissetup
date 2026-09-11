@@ -4,11 +4,13 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
 	"aegis-setup/internal/config"
 	"aegis-setup/internal/precheck"
+	"aegis-setup/internal/setup"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -36,6 +38,69 @@ var isTerminal = func(f *os.File) bool {
 		return false
 	}
 	return term.IsTerminal(int(f.Fd()))
+}
+
+// La elevación sale a variables para poder probar el flujo sin un cartel de UAC de
+// por medio: pedir permisos de verdad es una acción del operador, no algo que una
+// prueba pueda apretar.
+var (
+	isAdmin       = setup.IsAdmin
+	skipElevation = setup.SkipElevation
+	elevate       = setup.Elevate
+)
+
+// comandosQueEscriben es la única lista de quién pide permisos. Sólo los que
+// modifican la máquina: check, checklist y dashboard tienen que poder correr sin
+// permisos, porque son justamente lo que se usa cuando algo está mal, y una PC rota
+// suele ser una donde no hay forma de aceptar un UAC (sesión remota, script, otro
+// usuario).
+var comandosQueEscriben = map[string]bool{
+	"setup-db":  true,
+	"setup-app": true,
+}
+
+// writesToSystem dice si un subcomando modifica la máquina (y por lo tanto necesita
+// permisos de administrador).
+func writesToSystem(sub string) bool { return comandosQueEscriben[sub] }
+
+// subcomandoDe dice qué subcomando se pidió, sin ejecutar nada. Se apoya en el
+// buscador de cobra para no reimplementar el parseo de banderas (--config toma
+// valor, --help no).
+func subcomandoDe(root *cobra.Command, args []string) string {
+	target, _, err := root.Find(args)
+	if err != nil || target == nil {
+		return ""
+	}
+	return target.Name()
+}
+
+// asegurarAdmin decide si este proceso tiene que relanzarse elevado antes de
+// ejecutar el trabajo.
+//
+// Devuelve hecho=true cuando el trabajo lo hizo el proceso elevado: el padre no
+// puede seguir, porque dos Aegis escribiendo la misma base al mismo tiempo se pisan.
+// El código de salida del padre es el del proceso elevado (exit 3 tiene que seguir
+// siendo exit 3), y por eso no se devuelve un error para el caso "terminó con
+// código 3": cobra lo imprimiría como un fallo de Aegis, que no es lo que pasó.
+func asegurarAdmin(w io.Writer, sub string, args []string) (bool, int, error) {
+	if !writesToSystem(sub) {
+		return false, 0, nil
+	}
+	if !setup.NeedsElevation(isAdmin(), skipElevation()) {
+		return false, 0, nil
+	}
+	// El aviso va antes del cartel de UAC: un pedido de permisos que aparece sin
+	// explicación en la consola se lee como si el programa estuviera haciendo algo
+	// raro.
+	fmt.Fprintf(w, "Para %q hacen falta permisos de administrador: se relanza el mismo comando elevado.\n", sub)
+	code, err := elevate(args)
+	if err != nil {
+		return false, 0, fmt.Errorf("no se pudo pedir permisos de administrador: %w", err)
+	}
+	// El código se imprime siempre: es lo único que queda de la salida del proceso
+	// elevado si la consola nueva no se hereda.
+	fmt.Fprintf(w, "El comando elevado terminó con código %d.\n", code)
+	return true, code, nil
 }
 
 // NewRootCmd crea el comando raíz y registra setup-db, setup-app, check, dashboard, menu, configure.
@@ -144,6 +209,18 @@ func Execute() int {
 	}
 
 	cmd := NewRootCmd(dir, config.Load)
+
+	// La elevación se decide ANTES de que cobra ejecute el trabajo: si hay que
+	// relanzar, el proceso padre no llega a hacer nada y su código de salida es el del
+	// proceso elevado. Resolverlo dentro del RunE obligaría a distinguir "terminé
+	// bien" de "terminó allá" con un error, y cobra imprimiría un "Error:" que no lo es.
+	if hecho, code, err := asegurarAdmin(os.Stdout, subcomandoDe(cmd, os.Args[1:]), os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return ExitGeneralErr
+	} else if hecho {
+		return code
+	}
+
 	if err := cmd.Execute(); err != nil {
 		switch {
 		case errors.Is(err, ErrConfig):

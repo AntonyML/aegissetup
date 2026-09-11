@@ -224,6 +224,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "c", "C":
 				m.screen = screenChecklist
 				return m, nil
+			case "e", "E":
+				return m.pedirPermisos()
 			default:
 				for _, it := range menuItems {
 					if msg.String() == it.key {
@@ -235,6 +237,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case screenAsk:
 			return m.updateAsk(msg)
 		case screenDone, screenHelp, screenChecklist:
+			// [E] vale también acá: es justo donde el checklist dice que falta
+			// "permisos de administrador".
+			if msg.String() == "e" || msg.String() == "E" {
+				return m.pedirPermisos()
+			}
 			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "q" || msg.String() == "c" {
 				m.lines = nil
 				m.taskErr = nil
@@ -569,17 +576,20 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 			emit("FALTA: " + miss)
 		}
 		savePWD := !cfg.UseWinAuth // solo dev/docker guarda PWD
-		if err := setup.WriteDSN(cfg, appPass, savePWD, emit); err != nil {
+		if err := escribirDSN(cfg, appPass, savePWD, emit); err != nil {
 			return err
 		}
 		for _, f := range setup.InstallOCX(cfg.LegacyDir, emit) {
 			emit("OCX PENDIENTE: " + f)
 		}
+		// El runtime de Crystal sale del propio binario: en una PC limpia no hay
+		// carpeta de instalación de Crystal Reports que copiar.
+		instalarCrystal(emit)
 		if !cfg.UseWinAuth {
 			if appPass == "" {
 				return fmt.Errorf("falta %s para el parche _DOCKER", envAppPassword)
 			}
-			return setup.PatchDockerExe(cfg.AppDir, cfg.SQLUser, appPass, emit)
+			return parcheDocker(cfg.AppDir, cfg.SQLUser, appPass, emit)
 		}
 		return nil
 
@@ -681,6 +691,7 @@ func (m Model) viewMenu() string {
 	b.WriteString("\n" + s.HelpBar.Render(
 		s.Key.Render("[↑↓/Enter]")+s.Desc.Render(" elegir   ")+
 			s.Key.Render("[C]")+s.Desc.Render(" checklist   ")+
+			s.Key.Render("[E]")+s.Desc.Render(" permisos   ")+
 			s.Key.Render("[H]")+s.Desc.Render(" ayuda   ")+
 			s.Key.Render("[Q]")+s.Desc.Render(" salir")))
 	return s.Box.Render(b.String())
@@ -877,7 +888,13 @@ func renderHelp(s Styles) string {
 		"- assets/backups/sqlserver2014/ -> el .bak de SIDC (SQL 2014).\n" +
 		"- assets/legacy/ocx/ -> los 11 OCX de la PC vieja.\n" +
 		"- assets/oldpc/NOTAS.txt -> DSN, collation, usuarios app.\n\n" +
-		"Teclas: 0-6 ejecutan, flechas+Enter eligen, C checklist, H ayuda, Q salir.\n\n" +
+		"El runtime de Crystal (43 archivos, 24 MB) ya no es un drop manual: viaja dentro del\n" +
+		"EXE y Setup App lo copia a SysWOW64 y registra los 4 componentes COM.\n\n" +
+		"Permisos de administrador:\n\n" +
+		"- [E] pide permisos y relanza Aegis elevado; check, checklist y dashboard nunca los piden.\n" +
+		"- Desde la consola, setup-db y setup-app se elevan solos (el padre espera y devuelve el mismo código).\n" +
+		"- AEGIS_NO_ELEVAR=1 corta el reintento en el proceso ya elevado.\n\n" +
+		"Teclas: 0-6 ejecutan, flechas+Enter eligen, C checklist, E permisos, H ayuda, Q salir.\n\n" +
 		"Checklist y desbloqueo:\n\n" +
 		"- C muestra los requisitos de la PC (admin, SysWOW64, Docker, motor, driver ODBC, .bak, base, DSN, Crystal, OCX, archivos de SIDC).\n" +
 		"- Cada uno dice para qué sirve, qué hacer si falta y qué opción del menú traba.\n" +

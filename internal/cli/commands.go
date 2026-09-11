@@ -43,43 +43,62 @@ func newSetupDbCmd(res func() (config.Config, string, error)) *cobra.Command {
 }
 
 func newSetupAppCmd(res func() (config.Config, string, error)) *cobra.Command {
-	var appPass string
-	var savePWD, patch bool
+	var o setupAppOpts
 	cmd := &cobra.Command{
 		Use:   "setup-app",
-		Short: "Setup 2/2: DSN SIDC_SQL 32-bit + OCX legacy + verifica app (+parche _DOCKER en dev)",
+		Short: "Setup 2/2: DSN SIDC_SQL 32-bit + OCX legacy + Crystal + verifica app (+parche _DOCKER en dev)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := res()
 			if err != nil {
 				return err
 			}
-			if appPass == "" {
-				appPass = os.Getenv("AEGIS_SQL_PASSWORD")
+			if o.appPass == "" {
+				o.appPass = os.Getenv("AEGIS_SQL_PASSWORD")
 			}
-			out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
-			for _, m := range setup.CheckAppFiles(cfg.AppDir) {
-				fmt.Fprintln(cmd.OutOrStdout(), "FALTA: "+m)
-			}
-			if err := setup.WriteDSN(cfg, appPass, savePWD, out); err != nil {
-				return err
-			}
-			if failed := setup.InstallOCX(cfg.LegacyDir, out); len(failed) > 0 {
-				for _, f := range failed {
-					fmt.Fprintln(cmd.OutOrStdout(), "OCX PENDIENTE: "+f)
-				}
-			}
-			if patch && !cfg.UseWinAuth {
-				if err := setup.PatchDockerExe(cfg.AppDir, cfg.SQLUser, appPass, out); err != nil {
-					return err
-				}
-			}
-			return nil
+			return ejecutarSetupApp(cfg, o, func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) })
 		},
 	}
-	cmd.Flags().StringVar(&appPass, "app-password", "", "clave login app (o env AEGIS_SQL_PASSWORD)")
-	cmd.Flags().BoolVar(&savePWD, "save-pwd", false, "guardar PWD en el DSN (SOLO dev/docker, nunca prod)")
-	cmd.Flags().BoolVar(&patch, "patch-docker", false, "generar _DOCKER.exe con UID/PWD (solo dev/docker)")
+	cmd.Flags().StringVar(&o.appPass, "app-password", "", "clave login app (o env AEGIS_SQL_PASSWORD)")
+	cmd.Flags().BoolVar(&o.savePWD, "save-pwd", false, "guardar PWD en el DSN (SOLO dev/docker, nunca prod)")
+	cmd.Flags().BoolVar(&o.patch, "patch-docker", false, "generar _DOCKER.exe con UID/PWD (solo dev/docker)")
 	return cmd
+}
+
+// setupAppOpts son las banderas del paso 2.
+type setupAppOpts struct {
+	appPass string
+	savePWD bool
+	patch   bool
+}
+
+// ejecutarSetupApp es el paso 2 completo: DSN, OCX legacy, runtime de Crystal y el
+// parche _DOCKER en dev. Está aparte del comando para poder probar el orden y el
+// alcance de los pasos que tocan la máquina sin escribir en el registro ni reescribir
+// el .exe de la app.
+func ejecutarSetupApp(cfg config.Config, o setupAppOpts, out func(string)) error {
+	for _, m := range setup.CheckAppFiles(cfg.AppDir) {
+		out("FALTA: " + m)
+	}
+	if err := escribirDSN(cfg, o.appPass, o.savePWD, out); err != nil {
+		return err
+	}
+	for _, f := range setup.InstallOCX(cfg.LegacyDir, out) {
+		out("OCX PENDIENTE: " + f)
+	}
+	// El runtime de Crystal sale del propio binario: en una PC limpia no hay carpeta de
+	// instalación de Crystal Reports que copiar.
+	for _, f := range InstalarCrystal(out) {
+		out("CRYSTAL PENDIENTE: " + f)
+	}
+	if o.patch && !cfg.UseWinAuth {
+		// Mismo corte que el TUI: parchear con clave vacía deja un _DOCKER.exe que
+		// arranca y falla al conectar, que es peor que no generarlo.
+		if o.appPass == "" {
+			return fmt.Errorf("falta AEGIS_SQL_PASSWORD para el parche _DOCKER")
+		}
+		return parcheDocker(cfg.AppDir, cfg.SQLUser, o.appPass, out)
+	}
+	return nil
 }
 
 func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {

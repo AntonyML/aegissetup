@@ -78,3 +78,52 @@ func TestRespaldosNoEmbebidos(t *testing.T) {
 		t.Fatalf("no se pudo recorrer el embed: %v", err)
 	}
 }
+
+// Crystal() es la puerta del instalador al runtime: quien la llama no tiene que
+// saber cómo está armado el embed. Si la raíz quedara en legacy/crystal/...,
+// InstallCrystal copiaría a SysWOW64 una carpeta con subcarpetas adentro.
+func TestCrystalFSTieneLaRaizPlana(t *testing.T) {
+	fsys := Crystal()
+	for _, f := range componentesCOM {
+		nombre := strings.TrimPrefix(f, "legacy/crystal/SIDC_CRYSTAL/")
+		if _, err := fs.Stat(fsys, nombre); err != nil {
+			t.Errorf("falta %s en la raíz del runtime: %v", nombre, err)
+		}
+	}
+	if _, err := fs.Stat(fsys, "legacy"); err == nil {
+		t.Error("la raíz todavía tiene legacy/: el instalador tendría que armar la ruta a mano")
+	}
+}
+
+// El runtime que se instala tiene que ser plano y completo: InstallCrystal copia
+// archivos a SysWOW64 y no crea subcarpetas, así que un directorio adentro del
+// embed pasaría inadvertido hasta que el reporte fallara en la PC.
+func TestCrystalFSEsPlanoYCompleto(t *testing.T) {
+	fsys := Crystal()
+	n := 0
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if p != "." {
+				t.Errorf("el runtime tiene el subdirectorio %s y se instala plano", p)
+			}
+			return nil
+		}
+		n++
+		f, err := fsys.Open(p)
+		if err != nil {
+			t.Errorf("no se puede abrir %s: %v", p, err)
+			return nil
+		}
+		f.Close()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("no se pudo recorrer el runtime: %v", err)
+	}
+	if n < 40 {
+		t.Errorf("el runtime tiene %d archivos, se esperan >= 40", n)
+	}
+}

@@ -39,6 +39,25 @@ type Resumen struct {
 // SIN el runtime adentro. Referenciarlo desde un init lo mantiene enlazado.
 var Info = resumir()
 
+// Crystal es el runtime de Crystal Reports listo para instalar, con la raíz en la
+// propia carpeta del runtime.
+//
+// La raíz plana no es un detalle de estilo: quien lo instala copia los archivos a
+// C:\Windows\SysWOW64, así que si el FS conservara el prefijo
+// legacy/crystal/SIDC_CRYSTAL/ habría que armar la ruta a mano en cada llamador y
+// una carpeta se copiaría como carpeta. El que instala no tiene por qué saber cómo
+// está armado el embed.
+//
+// Devuelve error de una sola forma (sub FS válido): si el embed no tuviera ese
+// directorio, esto paniquea al arrancar, que es cuando hay que enterarse.
+func Crystal() fs.FS {
+	sub, err := fs.Sub(Legacy, "legacy/crystal/SIDC_CRYSTAL")
+	if err != nil {
+		panic("el runtime de Crystal no está en el embed: " + err.Error())
+	}
+	return sub
+}
+
 func resumir() Resumen {
 	var r Resumen
 	err := fs.WalkDir(Legacy, ".", func(_ string, d fs.DirEntry, err error) error {

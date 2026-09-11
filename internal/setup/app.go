@@ -4,7 +4,6 @@ package setup
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -30,8 +29,10 @@ var SupportFiles = []string{
 // CrystalFiles es el mínimo del runtime de Crystal Reports 8 para
 // diagnosticar: motor + RDC + visor + puentes ODBC (los reportes de
 // SIDC conectan por ODBC: sin p2sodbc/u2fodbc dan "database DLL").
-// El runtime completo (~40 DLLs) NO se copia a mano: se instala con
-// su Setup original. Ver assets/legacy/crystal/LEEME.txt.
+//
+// Es una lista de diagnóstico, no de instalación: el runtime completo (~43
+// archivos) lo instala InstallCrystal desde el propio binario. Los dos controles
+// que hay que REGISTRAR son CrystalCOM; crpe32 y los puentes ODBC solo se copian.
 var CrystalFiles = []string{
 	"crpe32.dll", "craxDrt.dll", "craxddrt.dll", "crviewer.dll", "Crystl32.OCX",
 	"p2sodbc.dll", "u2fodbc.dll",
@@ -96,23 +97,22 @@ func CheckAppFiles(appDir string) []string {
 // Solo Windows. Devuelve lista de los que fallaron.
 func InstallOCX(legacyDir string, out func(string)) []string {
 	var failed []string
-	syswow := `C:\Windows\SysWOW64`
-	reg := filepath.Join(syswow, "regsvr32.exe")
 	for _, f := range RequiredOCX {
 		src := filepath.Join(legacyDir, f)
 		if _, err := os.Stat(src); err != nil {
 			failed = append(failed, f+" (falta en "+legacyDir+", cópialo de la PC vieja)")
 			continue
 		}
-		dst := filepath.Join(syswow, f)
+		dst := filepath.Join(SysWOW64, f)
 		if _, err := os.Stat(dst); err != nil {
 			if cpErr := copyFile(src, dst); cpErr != nil {
 				failed = append(failed, f+" (no se pudo copiar a SysWOW64, corre como Admin: "+cpErr.Error()+")")
 				continue
 			}
 		}
-		cmd := exec.Command(reg, "/s", dst)
-		if err := cmd.Run(); err != nil {
+		// Mismo registrar que los componentes de Crystal: quién es el regsvr32
+		// correcto (el de 32 bits) se decide en un solo lugar.
+		if err := RegisterCOM(dst); err != nil {
 			failed = append(failed, f+" (regsvr32 falló: "+err.Error()+")")
 			continue
 		}
@@ -124,7 +124,7 @@ func InstallOCX(legacyDir string, out func(string)) []string {
 			out("SOPORTE FALTA (opcional): " + f)
 			continue
 		}
-		dst := filepath.Join(syswow, f)
+		dst := filepath.Join(SysWOW64, f)
 		if _, err := os.Stat(dst); err != nil {
 			if cpErr := copyFile(src, dst); cpErr != nil {
 				failed = append(failed, f+" (no se pudo copiar a SysWOW64, corre como Admin: "+cpErr.Error()+")")

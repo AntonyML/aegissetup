@@ -21,6 +21,8 @@ terminada la instalación.
 
 ## Características
 
+- **Crystal sin instalador** — el runtime de Crystal Reports 8 viaja dentro del `EXE` y Setup App lo instala y registra solo.
+- **Elevación al pedido** — `[E]` en el menú (o el propio subcomando) relanza Aegis como administrador y hereda el código de salida; el diagnóstico nunca queda detrás del UAC.
 - **Instalación desatendida** — un solo comando restaura la base, deja el entorno listo y verifica el resultado.
 - **Perfil por máquina** — la primera vez pregunta en qué PC está corriendo y lo guarda; el resto de las corridas ya no pregunta.
 - **Multi-entorno con un mismo binario** — `dev` (Docker), `prod local`, `prod server`, sin recompilar la app.
@@ -37,7 +39,7 @@ terminada la instalación.
 | **Windows** | Requerido para el flujo completo: DSN ODBC de 32 bits, registro OCX y SQL Server |
 | **SQL Server** | 2014+ (prod: 2014 Express; dev: Docker) |
 | **Docker** | Opcional, para la base de desarrollo |
-| **Privilegios** | Administrador (el DSN se escribe en `HKLM` y los OCX en `SysWOW64`) |
+| **Privilegios** | Administrador para lo que escribe (`setup-db`, `setup-app`): Aegis se relanza elevado solo. `check`, `checklist` y `dashboard` corren sin permisos. |
 
 ## Compilar
 
@@ -57,7 +59,7 @@ viejo junto al binario se sigue leyendo si el canónico todavía no existe.
 | Comando | Función |
 | --- | --- |
 | `setup-db` | Restaura el `.bak` como `SIDC`: collation, compat level, logins y `CHECKDB`. |
-| `setup-app` | Crea el DSN `SIDC_SQL` de 32 bits, instala los OCX legacy y verifica exe/reportes. |
+| `setup-app` | Crea el DSN `SIDC_SQL` de 32 bits, instala los OCX legacy, instala el runtime de Crystal embebido y verifica exe/reportes. |
 | `check` | Valida TCP + SQL + DSN + ficheros (App ⇄ DB). Solo lectura. |
 | `checklist` | Requisitos de la máquina en orden: qué falta, por qué importa, cómo se arregla y qué opción queda trabada. Solo lectura. |
 | `dashboard` | Panel de estado no interactivo (env, DSN, DB, app). |
@@ -126,6 +128,17 @@ Tres reglas que explican por qué está armado así:
 La TUI aplica la misma puerta y muestra el checklist con `[C]`. La política de qué traba
 qué vive en `internal/precheck` (`trabaPorRequisito`), y la comparten la TUI y la CLI: no
 pueden discrepar sobre la misma máquina.
+
+### Permisos
+
+Aegis no arranca elevado: lo pide cuando hace falta.
+
+| Dónde | Qué pasa |
+| --- | --- |
+| `setup-db`, `setup-app` | El proceso padre avisa, relanza el mismo comando elevado, espera y devuelve **el mismo código de salida** del hijo. |
+| Menú de la TUI | `[E]` relanza Aegis elevado en otra ventana y cierra la actual (dos Aegis sobre la misma máquina se pisan). |
+| `check`, `checklist`, `dashboard` | Nunca piden permisos: son el diagnóstico, y en una PC rota puede no haber forma de aceptar un UAC. |
+| `AEGIS_NO_ELEVAR=1` | Corta la elevación. Es la marca que se le pone al proceso ya elevado para que no se relance a sí mismo en un bucle de UAC. |
 
 ### Códigos de salida
 
@@ -305,7 +318,7 @@ Estos artefactos **no** van al control de versiones y los colocás vos antes de 
 | --- | --- |
 | `assets/backups/sqlserver2014/` | El `.bak` de SIDC (SQL 2014). En la PC destino va a `C:\ProgramData\AegisSetup\assets\backups\sqlserver2014\`, o al lado del `.exe`. |
 | `assets/legacy/ocx/` | Los OCX/DLL de la PC vieja (se registran con `regsvr32`). Van dentro del binario. |
-| `assets/legacy/crystal/` | Runtime de Crystal Reports 8 (va dentro del binario). |
+| `assets/legacy/crystal/` | Runtime de Crystal Reports 8. Va dentro del binario: Setup App lo instala solo (no es un paso manual). |
 | `assets/oldpc/NOTAS.txt` | DSN, collation y usuarios de la app (referencia). |
 
 ## Estructura
@@ -330,7 +343,8 @@ AegisSetup/
 
 - **DSN de 32 bits**: se escribe directo en el registro (`HKLM\SOFTWARE\WOW6432Node\ODBC\ODBC.INI\SIDC_SQL`) con `registry.CreateKey`, no vía la API de ODBC. Por eso `--save-pwd` sí persiste el `PWD` (solo dev).
 - **OCX legacy**: se copian a `SysWOW64` y se registran con `regsvr32` de 32 bits. Además de los 11 controles, hay 11 DLL de soporte (satélites en español y data binding) que solo se copian.
-- **Crystal Reports**: `check` valida el mínimo del runtime (`crpe32`, `craxddrt`, `crviewer`, puentes ODBC `p2sodbc`/`u2fodbc`). El runtime completo se instala con su Setup original.
+- **Crystal Reports**: el runtime completo (43 archivos, 24 MB) viaja dentro de `Aegis.exe`. Setup App lo copia a `SysWOW64` y registra los 4 componentes COM que usan los reportes (`crviewer.dll`, `Crystl32.OCX`, `craxdrt.dll`, `craxddrt.dll`); el resto son dependencias que con existir alcanzan. Se copia solo lo que falta o difiere, y el registro se repite igual (que el archivo esté no quiere decir que esté registrado). `check` valida el mínimo del runtime.
+- **Elevación**: no hay manifiesto `requireAdministrator`, porque dejaría `check`, `checklist` y `dashboard` detrás de un UAC — justo los comandos que se usan cuando algo está mal. En su lugar Aegis se relanza elevado cuando el subcomando escribe en la máquina (`setup-db`, `setup-app`), y en el menú con `[E]`. El proceso padre espera al hijo y devuelve su mismo código de salida.
 - **Parche `_DOCKER.exe`**: reemplaza `Initial Catalog=SIDC` (20 caracteres) por `UID=<user>;PWD=<pass>` dentro del binario, sin alargarlo. El largo de la clave está acotado por ese espacio — la TUI valida antes de arrancar para no fallar al final.
 - **Checklist-puerta**: `internal/precheck` diagnostica (sondas inyectadas, así se testea sin ser admin, sin Docker y sin SysWOW64) y declara en `trabaPorRequisito` qué etapas traba cada requisito. `internal/ui/gate.go` traduce una tecla del menú a la etapa que le corresponde. La política vive en un solo lugar para que la TUI y `aegis checklist` no puedan discrepar sobre la misma máquina.
 - **Conexión SQL compartida**: el checklist y `check` usan el mismo `setup.AppDSN`, en vez de armar cada uno su cadena: dos constructores distintos terminan reportando cosas distintas de la misma base.
@@ -346,9 +360,9 @@ gofmt -l .      # formatting
 ## Estado
 
 Instalador funcional de punta a punta en dev. Hecho: CI + releases, runtime embebido, rutas
-machine-wide, checklist-puerta y perfil por máquina al arrancar. Pendiente: instalación
-automática de Crystal con elevación, descarga del `.bak`, desinstalación limpia y validación
-en una PC limpia.
+machine-wide, checklist-puerta, perfil por máquina al arrancar e instalación automática de
+Crystal con elevación al pedido. Pendiente: descarga del `.bak`, desinstalación limpia y
+validación en una PC limpia (incluye probar el UAC real).
 
 ## Licencia
 

@@ -6,15 +6,20 @@ package precheck
 import (
 	"os"
 
-	"golang.org/x/sys/windows"
+	"aegis-setup/internal/setup"
+
 	"golang.org/x/sys/windows/registry"
 )
 
 // esAdmin mira el token del proceso. Casi todo lo que hace Aegis toca HKLM y
 // SysWOW64, así que sin elevación el operador vería errores de permisos recién
 // al final, después de minutos de RESTORE.
+//
+// La consulta vive en setup.IsAdmin, que es la misma que usa setup.Elevate para
+// decidir si hay que relanzar: dos formas de preguntar lo mismo terminan en un
+// checklist que dice "falta admin" mientras la elevación no hace nada (o al revés).
 func esAdmin() (bool, string) {
-	if windows.GetCurrentProcessToken().IsElevated() {
+	if setup.IsAdmin() {
 		return true, "sesión elevada"
 	}
 	return false, "sesión sin elevar"

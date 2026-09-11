@@ -175,7 +175,7 @@ func Run(cfg config.Config, appPass string, s Sondas) []Requisito {
 	out = append(out, veredicto(ReqAdmin, "Permisos de administrador",
 		"Sin elevación no se registran los OCX, ni se escribe el DSN, ni se restaura la base.",
 		ok, det,
-		"Cerrá Aegis y abrilo otra vez con click derecho → Ejecutar como administrador."))
+		"Apretá [E] en el menú para pedir permisos y relanzar Aegis elevado, o cerrá Aegis y abrilo con click derecho → Ejecutar como administrador."))
 
 	ok, det = s.Maquina()
 	out = append(out, veredicto(ReqMaquina, "Windows de 64 bits con SysWOW64",
@@ -225,7 +225,7 @@ func Run(cfg config.Config, appPass string, s Sondas) []Requisito {
 		out = append(out, veredicto(ReqCrystal, "Runtime de Crystal Reports",
 			"Los 57 reportes de SIDC se generan con este runtime.",
 			false, "faltan en SysWOW64: "+resumenLista(faltan),
-			"Corré Setup App (menú [2]) para instalarlo desde el runtime embebido. Si esa opción todavía no lo instala, usá el Setup original de Crystal que está en assets/legacy/crystal/."))
+			"Corré Setup App (menú [2]) para instalarlo desde el runtime embebido (43 archivos, 24 MB, viajan dentro de Aegis.exe)."))
 	} else {
 		out = append(out, veredicto(ReqCrystal, "Runtime de Crystal Reports",
 			"Los 57 reportes de SIDC se generan con este runtime.",
