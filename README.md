@@ -56,17 +56,63 @@ El binario queda en `bin/aegis.exe` y lee `config.json` **junto a él** (o la ru
 | `setup-db` | Restaura el `.bak` como `SIDC`: collation, compat level, logins y `CHECKDB`. |
 | `setup-app` | Crea el DSN `SIDC_SQL` de 32 bits, instala los OCX legacy y verifica exe/reportes. |
 | `check` | Valida TCP + SQL + DSN + ficheros (App ⇄ DB). Solo lectura. |
+| `checklist` | Requisitos de la máquina en orden: qué falta, por qué importa, cómo se arregla y qué opción queda trabada. Solo lectura. |
 | `dashboard` | Panel de estado no interactivo (env, DSN, DB, app). |
 | `menu` | TUI interactivo (instalación completa, por etapas y presets). |
 | `configure` | Genera el `config.json` inicial. |
 
 Sin subcomando, `aegis` abre directamente la TUI (si hay terminal interactiva).
 
+### Checklist y desbloqueo progresivo
+
+El checklist es una lista **ordenada por dependencia**: cada requisito dice qué falta,
+por qué importa, qué hacer y **qué opción del menú deja trabada**. Resolverlo de arriba
+hacia abajo es lo que va destrabando el resto.
+
+```text
+$ aegis checklist
+FALTA  3. Docker en marcha
+           docker no responde (¿está instalado y el motor encendido?)
+           por qué: El perfil de pruebas corre SQL Server 2019 en un contenedor.
+           arreglo: Instalá Docker Desktop y levantá el motor: docker compose -f docker/docker-compose.yml up -d
+           traba:   Setup DB, Instalación completa
+```
+
+Tres reglas que explican por qué está armado así:
+
+- **El diagnóstico nunca se traba.** `check`, `checklist`, `dashboard` y los presets
+  siguen disponibles con todo roto: son justamente la herramienta que dice qué arreglar.
+- **Lo que falta no siempre traba.** En una PC limpia la base y el DSN faltan y el flujo
+  arranca igual, porque son el **resultado** de `setup-db`/`setup-app` y no su condición
+  previa. Contarlos como bloqueo sería circular.
+- **Cada bloqueo tiene salida.** Los OCX faltantes se avisan pero no traban: los instala
+  el propio `setup-app`. Si trabaran esa opción, el operador no tendría cómo resolverlos.
+- **Hay un tercer estado.** `AVISO` significa "no lo pude verificar", no "está mal". El caso
+  real: una instancia con nombre (`localhost\SQLEXPRESS`, el default de Express, que es el
+  motor de producción) negocia el puerto por SQL Browser, así que sondear un puerto fijo no
+  prueba nada. Ahí se avisa y decide la conexión real a la base. Un `AVISO` nunca traba.
+
+La TUI aplica la misma puerta y muestra el checklist con `[C]`. La política de qué traba
+qué vive en `internal/precheck` (`trabaPorRequisito`), y la comparten la TUI y la CLI: no
+pueden discrepar sobre la misma máquina.
+
+### Códigos de salida
+
+| Código | Significado |
+| ---: | --- |
+| `0` | OK |
+| `1` | Error general |
+| `2` | Error de configuración |
+| `3` | `check` o `checklist` con fallos: la máquina no está lista |
+
+El `3` es distinto del `1` a propósito: permite que un script distinga "esta máquina no
+está lista" (se arregla instalando algo) de "Aegis se rompió" (se arregla Aegis).
+
 ### Flags
 
 ```text
 Globales
-  --config string    ruta a config.json (default: junto al binario)
+  --config string    ruta a config.json (default: %APPDATA%\AegisSetup\config.json)
   --server string    server del preset "prod server" de la TUI
 
 setup-db
@@ -79,24 +125,19 @@ setup-app
   --save-pwd             guarda el PWD en el DSN (SOLO dev/docker, nunca prod)
   --patch-docker         genera _DOCKER.exe con UID/PWD embebidos (solo dev/docker)
 
-check / dashboard
+check / checklist / dashboard
   --app-password string  clave del login SQL Auth (o env AEGIS_SQL_PASSWORD)
 
 configure
   --env string       dev | prod
   --db-mode string   docker | local | server
   --server string    localhost,14333 | localhost | CONTABILIDAD | MI_SERVIDOR
-  --out string       ruta de salida (default: config.json junto al binario)
+  --out string       ruta de salida (default: %APPDATA%\AegisSetup\config.json)
 ```
 
 ### Códigos de salida
 
-| Código | Significado |
-| ---: | --- |
-| `0` | OK |
-| `1` | Error general |
-| `2` | Error de configuración |
-| `3` | `check` con fallos |
+Los códigos de salida están documentados arriba, con el checklist.
 
 ## Flujo rápido
 
@@ -105,10 +146,11 @@ cd AegisSetup
 go build -o bin/aegis.exe ./cmd/aegis
 
 ./bin/aegis configure --env dev --db-mode docker   # 1. genera config.json
-docker compose -f docker/docker-compose.yml up -d   # 2. base dev (SQL 2019, compat 120)
-./bin/aegis setup-db                                 # 3. restaura el .bak como SIDC
-./bin/aegis setup-app                                # 4. DSN + OCX + verificación
-./bin/aegis check                                    # 5. valida App ⇄ DB
+./bin/aegis checklist                                # 2. ¿la máquina está lista? (exit 3 = no)
+docker compose -f docker/docker-compose.yml up -d   # 3. base dev (SQL 2019, compat 120)
+./bin/aegis setup-db                                 # 4. restaura el .bak como SIDC
+./bin/aegis setup-app                                # 5. DSN + OCX + verificación
+./bin/aegis check                                    # 6. valida App ⇄ DB
 ./bin/aegis menu                                     # o todo de un tirón desde la TUI
 ```
 
@@ -133,12 +175,39 @@ docker compose -f docker/docker-compose.yml up -d   # 2. base dev (SQL 2019, com
   "compat": 120,
   "app_dir": "C:\\DEV\\SIDC",
   "docker_dir": "C:\\DEV\\SIDC\\docker-dev",
-  "backup_dir": "C:\\DEV\\SIDC\\AegisSetup\\assets\\backups\\sqlserver2014",
+  "backup_dir": "C:\\ProgramData\\AegisSetup\\assets\\backups\\sqlserver2014",
   "legacy_dir": "C:\\DEV\\SIDC\\AegisSetup\\assets\\legacy\\ocx"
 }
 ```
 
 > `database` (`SIDC`) y `dsn_name` (`SIDC_SQL`) son fijos: el `.exe` los trae hardcodeados.
+>
+> **`app_dir`, `docker_dir` y `legacy_dir` todavía traen rutas de la máquina de
+desarrollo.** En una PC de FEMUCARIBE hay que apuntarlos a donde esté SIDC. `backup_dir`
+ya usa la ruta de máquina correcta (ver abajo).
+
+### Rutas de datos
+
+El instalador corre **elevado**, así que no puede escribir en "Documentos": esa carpeta
+apuntaría al perfil del administrador y no al del operador. Los datos viven en rutas de
+máquina:
+
+| Ruta | Qué guarda |
+| --- | --- |
+| `C:\ProgramData\AegisSetup\assets\backups\sqlserver2014\` | El `.bak` de SIDC. |
+| `C:\ProgramData\AegisSetup\assets\` | Artefactos que el instalador deja en la máquina. |
+| `%APPDATA%\AegisSetup\config.json` | La config del entorno. |
+
+`aegis` crea esas carpetas al arrancar (best-effort: el diagnóstico tiene que poder correr
+justo cuando algo está mal). El `.bak` se busca en este orden, y se usa el `.bak` **más
+nuevo** del primer directorio que tenga alguno:
+
+1. `backup_dir` de la config.
+2. `assets\backups\sqlserver2014\` **al lado del ejecutable** — el operador lo deja ahí y listo.
+3. `..\assets\backups\sqlserver2014\` — el binario de desarrollo vive en `bin/`.
+
+La config también se resuelve en orden: `--config` → `%APPDATA%\AegisSetup\config.json` →
+`config.json` junto al binario (compatibilidad con instalaciones previas).
 
 ### Modos (`db_mode`)
 
@@ -196,9 +265,9 @@ Estos artefactos **no** van al control de versiones y los colocás vos antes de 
 
 | Ruta | Contenido |
 | --- | --- |
-| `assets/backups/sqlserver2014/` | El `.bak` de SIDC (SQL 2014). |
-| `assets/legacy/ocx/` | Los OCX/DLL de la PC vieja (se registran con `regsvr32`). |
-| `assets/legacy/crystal/` | Instalador del runtime de Crystal Reports 8. |
+| `assets/backups/sqlserver2014/` | El `.bak` de SIDC (SQL 2014). En la PC destino va a `C:\ProgramData\AegisSetup\assets\backups\sqlserver2014\`, o al lado del `.exe`. |
+| `assets/legacy/ocx/` | Los OCX/DLL de la PC vieja (se registran con `regsvr32`). Van dentro del binario. |
+| `assets/legacy/crystal/` | Runtime de Crystal Reports 8 (va dentro del binario). |
 | `assets/oldpc/NOTAS.txt` | DSN, collation y usuarios de la app (referencia). |
 
 ## Estructura
@@ -210,8 +279,9 @@ AegisSetup/
 │   ├── cli/            # comandos Cobra: root, commands, menu, configure
 │   ├── config/         # config.json, defaults, validación y presets
 │   ├── setup/          # SetupDB, WriteDSN, InstallOCX, PatchDockerExe
+│   ├── precheck/       # checklist de requisitos + política de qué traba qué
 │   ├── check/          # verificación TCP + SQL + DSN + ficheros
-│   └── ui/             # TUI Bubble Tea (menú, pasos, prompts de claves)
+│   └── ui/             # TUI Bubble Tea (menú, checklist-puerta, pasos, prompts)
 ├── docker/             # SQL Server 2019 para dev + guía
 ├── assets/             # backups / legacy / oldpc (fuera del repo)
 ├── scripts/legacy/     # scripts de migración de la PC vieja (referencia)
@@ -224,6 +294,8 @@ AegisSetup/
 - **OCX legacy**: se copian a `SysWOW64` y se registran con `regsvr32` de 32 bits. Además de los 11 controles, hay 11 DLL de soporte (satélites en español y data binding) que solo se copian.
 - **Crystal Reports**: `check` valida el mínimo del runtime (`crpe32`, `craxddrt`, `crviewer`, puentes ODBC `p2sodbc`/`u2fodbc`). El runtime completo se instala con su Setup original.
 - **Parche `_DOCKER.exe`**: reemplaza `Initial Catalog=SIDC` (20 caracteres) por `UID=<user>;PWD=<pass>` dentro del binario, sin alargarlo. El largo de la clave está acotado por ese espacio — la TUI valida antes de arrancar para no fallar al final.
+- **Checklist-puerta**: `internal/precheck` diagnostica (sondas inyectadas, así se testea sin ser admin, sin Docker y sin SysWOW64) y declara en `trabaPorRequisito` qué etapas traba cada requisito. `internal/ui/gate.go` traduce una tecla del menú a la etapa que le corresponde. La política vive en un solo lugar para que la TUI y `aegis checklist` no puedan discrepar sobre la misma máquina.
+- **Conexión SQL compartida**: el checklist y `check` usan el mismo `setup.AppDSN`, en vez de armar cada uno su cadena: dos constructores distintos terminan reportando cosas distintas de la misma base.
 
 ## Desarrollo
 
@@ -235,8 +307,8 @@ gofmt -l .      # formatting
 
 ## Estado
 
-Análisis del binario legacy y documentación completados; implementación del
-instalador en curso.
+Instalador funcional de punta a punta en dev. Pendiente: instalación automática de Crystal
+con elevación, descarga del `.bak`, desinstalación limpia y validación en una PC limpia.
 
 ## Licencia
 
