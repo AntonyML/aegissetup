@@ -1,0 +1,59 @@
+name: release
+
+# F1 + F2: construye el EXE de Windows con el runtime legado embebido y lo
+# publica como asset del Release cuando se empuja un tag v*.
+#
+# El paso "Verificar runtime embebido" corre ANTES del build a propósito: si los
+# .dll de Crystal no están versionados, el embed se arma incompleto y el Release
+# publicaría un EXE que no sirve en una PC limpia. El test corta el pipeline.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: AegisSetup
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: AegisSetup/go.mod
+          cache-dependency-path: AegisSetup/go.sum
+
+      - name: Verificar runtime embebido
+        run: go test ./assets/...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Tests
+        run: go test ./...
+
+      - name: Build
+        run: go build -trimpath -ldflags "-s -w" -o aegis.exe ./cmd/aegis
+
+      - name: Reportar tamaño del binario
+        shell: pwsh
+        run: |
+          $exe = Get-Item aegis.exe
+          "{0} -> {1:N1} MB" -f $exe.Name, ($exe.Length / 1MB)
+
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AegisSetup/aegis.exe
+          generate_release_notes: true

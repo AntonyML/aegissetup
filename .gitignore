@@ -23,3 +23,19 @@ go.work.sum
 
 # env file
 .env
+
+# ---------------------------------------------------------------------------
+# Excepción deliberada (F2): runtime legado de SIDC.
+#
+# Las reglas *.dll / *.exe / *.so de arriba existen para no versionar
+# artefactos de build. Estos NO son artefactos de build: son dependencias de
+# runtime que el binario embebe (assets/embed.go) para poder instalar SIDC en
+# una PC limpia, sin depender de archivos sueltos.
+#
+# ADVERTENCIA: versionar estos archivos hace que el Release distribuya el
+# runtime de Crystal Reports 8 (Seagate/SAP), que es software propietario.
+# No es código de este proyecto.
+# ---------------------------------------------------------------------------
+!assets/legacy/crystal/SIDC_CRYSTAL/*.dll
+!assets/legacy/crystal/SIDC_CRYSTAL/*.OCX
+!assets/legacy/ocx/*.OCX
