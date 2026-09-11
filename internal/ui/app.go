@@ -10,6 +10,7 @@ import (
 
 	"aegis-setup/internal/check"
 	"aegis-setup/internal/config"
+	"aegis-setup/internal/precheck"
 	"aegis-setup/internal/setup"
 
 	"charm.land/bubbles/v2/spinner"
@@ -26,6 +27,7 @@ const (
 	screenDone
 	screenHelp
 	screenAsk
+	screenChecklist
 )
 
 type taskKind int
@@ -43,6 +45,9 @@ type taskFinishedMsg struct {
 	lines []string
 	err   error
 }
+
+// checksMsg trae el checklist ya evaluado. Corre en background porque consulta
+// el motor SQL: si fuera sincrónico, el menú tardaría en aparecer.
 
 // Model es el TUI de Aegis: menú que EJECUTA el flujo, no solo lo dice.
 type Model struct {
@@ -69,6 +74,15 @@ type Model struct {
 	// Vacío = comportamiento por defecto (CONTABILIDAD si la config actual
 	// apunta a localhost, o la config que ya hubiera).
 	presetServer string
+	// checks es el último checklist corrido. Vacío = todavía no corrió y por
+	// eso no se bloquea nada: una sonda que no respondió no puede encerrar al
+	// operador.
+	checks      []precheck.Requisito
+	verificando bool
+	// bloqueo distingue "el paso falló" de "no te dejo empezar": el operador
+	// reacciona distinto a cada uno y la pantalla no debería decir "error"
+	// cuando la puerta hizo su trabajo.
+	bloqueo bool
 }
 
 var menuItems = []menuEntry{
@@ -97,7 +111,18 @@ func (m Model) SetPresetServer(s string) Model {
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+type checksMsg struct{ rs []precheck.Requisito }
+
+func (m Model) Init() tea.Cmd { return m.runChecks() }
+
+// runChecks evalúa el checklist en background. El timeout de cada sonda lo pone
+// la sonda misma, así que acá no hace falta un contexto.
+func (m Model) runChecks() tea.Cmd {
+	cfg, secret := m.cfg, m.secret
+	return func() tea.Msg {
+		return checksMsg{rs: precheck.Run(cfg, secret(envAppPassword), precheck.SondasReales())}
+	}
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -109,6 +134,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenDone
 		m.lines = msg.lines
 		m.taskErr = msg.err
+		m.bloqueo = false
+		// Se recalcula el checklist: al terminar un paso se desbloquea el
+		// siguiente, y el operador lo tiene que ver sin pedirlo.
+		m.verificando = true
+		return m, m.runChecks()
+	case checksMsg:
+		m.checks = msg.rs
+		m.verificando = false
 		return m, nil
 	case spinner.TickMsg:
 		if m.screen == screenWorking {
@@ -142,6 +175,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenHelp
 				m.helpHTML = renderHelp(m.styles)
 				return m, nil
+			case "c", "C":
+				m.screen = screenChecklist
+				return m, nil
 			default:
 				for _, it := range menuItems {
 					if msg.String() == it.key {
@@ -152,11 +188,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case screenAsk:
 			return m.updateAsk(msg)
-		case screenDone, screenHelp:
-			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "q" {
+		case screenDone, screenHelp, screenChecklist:
+			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "q" || msg.String() == "c" {
 				m.screen = screenMenu
 				m.lines = nil
 				m.taskErr = nil
+				m.bloqueo = false
 				return m, nil
 			}
 			return m, nil
@@ -227,6 +264,18 @@ func (m Model) secret(name string) string {
 func (m Model) hasSecret(name string) bool { return m.secret(name) != "" }
 
 func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
+	// La puerta se consulta acá y no al dibujar: si el operador aprieta el
+	// número de una opción trabada, tiene que recibir qué le falta, no un
+	// arranque que va a fallar a mitad de camino.
+	if faltan := bloqueosDe(a, m.checks); len(faltan) > 0 {
+		m.screen = screenDone
+		m.bloqueo = true
+		m.task = taskNone
+		m.taskName = nombreDeAccion(a)
+		m.taskErr = nil
+		m.lines = append(arreglosDe(faltan), "", "Resolvé eso y volvé a intentar: el checklist se recalcula solo.")
+		return m, nil
+	}
 	switch a {
 	case actInstall:
 		if need := secretNeeds(m.cfg, m.hasSecret); len(need) > 0 {
@@ -270,6 +319,7 @@ func (m Model) startTask(k taskKind, name string) (tea.Model, tea.Cmd) {
 	m.taskName = name
 	m.lines = nil
 	m.taskErr = nil
+	m.bloqueo = false
 	cfg, secret := m.cfg, m.secret
 	return m, tea.Batch(m.spinner.Tick, func() tea.Msg {
 		var lines []string
@@ -392,6 +442,8 @@ func (m Model) View() tea.View {
 		content = m.viewDone()
 	case screenHelp:
 		content = m.helpHTML
+	case screenChecklist:
+		content = m.viewChecklist()
 	case screenAsk:
 		content = m.viewAsk()
 	default:
@@ -406,19 +458,97 @@ func (m Model) viewMenu() string {
 	s := m.styles
 	var b strings.Builder
 	b.WriteString(s.AppTitle.Render("AEGIS SETUP") + "\n")
-	b.WriteString(s.Subtitle.Render(fmt.Sprintf("env=%s db_mode=%s server=%s db=%s", m.cfg.Env, m.cfg.DbMode, m.cfg.Server, m.cfg.Database)) + "\n\n")
+	b.WriteString(s.Subtitle.Render(fmt.Sprintf("env=%s db_mode=%s server=%s db=%s", m.cfg.Env, m.cfg.DbMode, m.cfg.Server, m.cfg.Database)) + "\n")
+	b.WriteString(m.checklistLine() + "\n\n")
 	b.WriteString(s.SectionHeader.Render("FLUJO (se ejecuta solo, sin chorrear comandos)") + "\n")
 	for i, it := range menuItems {
 		cur := "  "
 		if m.cursor == i {
 			cur = s.Cursor.Render("> ")
 		}
-		b.WriteString(fmt.Sprintf("%s%s %s %s\n", cur, s.Key.Render("["+it.key+"]"), s.Value.Render(it.name), s.Muted.Render("- "+it.desc)))
+		trabada := bloqueosDe(it.action, m.checks)
+		nombre := s.Value.Render(it.name)
+		if len(trabada) > 0 {
+			nombre = s.Muted.Render(it.name)
+		}
+		linea := fmt.Sprintf("%s%s %s %s", cur, s.Key.Render("["+it.key+"]"), nombre, s.Muted.Render("- "+it.desc))
+		if len(trabada) > 0 {
+			linea += "  " + s.Error.Render("(falta: "+titulosDe(trabada)+")")
+		}
+		b.WriteString(linea + "\n")
 	}
 	b.WriteString("\n" + s.HelpBar.Render(
 		s.Key.Render("[↑↓/Enter]")+s.Desc.Render(" elegir   ")+
+			s.Key.Render("[C]")+s.Desc.Render(" checklist   ")+
 			s.Key.Render("[H]")+s.Desc.Render(" ayuda   ")+
 			s.Key.Render("[Q]")+s.Desc.Render(" salir")))
+	return s.Box.Render(b.String())
+}
+
+// checklistLine pinta la línea de estado del checklist. El color es la
+// información: verde si nada traba, rojo si algo sí.
+func (m Model) checklistLine() string {
+	s := m.styles
+	txt := resumenChecklist(m.checks, m.verificando)
+	switch {
+	case m.verificando || len(m.checks) == 0:
+		return s.Muted.Render(txt)
+	case len(precheck.Faltantes(m.checks)) == 0:
+		return s.Success.Render(txt)
+	default:
+		return s.Error.Render(txt)
+	}
+}
+
+// viewChecklist es el detalle: qué falta, por qué importa, qué hacer y qué
+// opción del menú queda trabada. Es el plan de trabajo de la PC.
+func (m Model) viewChecklist() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("CHECKLIST DE LA MAQUINA") + "\n")
+	b.WriteString(s.Subtitle.Render(fmt.Sprintf("env=%s db_mode=%s server=%s db=%s", m.cfg.Env, m.cfg.DbMode, m.cfg.Server, m.cfg.Database)) + "\n\n")
+
+	if m.verificando || len(m.checks) == 0 {
+		b.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), s.Info.Render("Verificando la máquina... consulta el motor SQL, puede tardar unos segundos.")))
+		b.WriteString("\n" + s.HelpBar.Render(s.Key.Render("[Esc]")+s.Desc.Render(" volver al menú")))
+		return s.Box.Render(b.String())
+	}
+
+	for _, r := range m.checks {
+		marca := s.Success.Render(r.Estado.Marca())
+		switch r.Estado {
+		case precheck.EstadoFalta:
+			marca = s.Error.Render(r.Estado.Marca())
+		case precheck.EstadoAviso:
+			marca = s.Warning.Render(r.Estado.Marca())
+		}
+		b.WriteString(fmt.Sprintf("%s %s\n", marca, s.Value.Render(r.Titulo)))
+		b.WriteString("    " + s.Muted.Render(r.Detalle) + "\n")
+		if r.Estado != precheck.EstadoOK {
+			b.WriteString("    " + s.Muted.Render("por qué: ") + s.Desc.Render(r.Motivo) + "\n")
+			b.WriteString("    " + s.Muted.Render("arreglo: ") + s.Value.Render(r.Arreglo) + "\n")
+			if deps := accionesQueDependenDe(r.ID); len(deps) > 0 {
+				b.WriteString("    " + s.Muted.Render("traba: "+strings.Join(deps, ", ")) + "\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Se distinguen los dos casos porque se ven iguales en pantalla y no lo son:
+	// en una PC limpia la base y el DSN están en rojo y no traban nada.
+	if bloquean := precheck.Bloqueantes(m.checks); len(bloquean) > 0 {
+		b.WriteString(s.Error.Render(resumenFaltantes(len(bloquean))) + "\n\n")
+	} else if faltan := precheck.Faltantes(m.checks); len(faltan) > 0 {
+		b.WriteString(s.Warning.Render(fmt.Sprintf("%d requisitos sin cumplir, y ninguno traba: son resultado del flujo (la base y el DSN), no condición para empezar.", len(faltan))) + "\n\n")
+	} else {
+		b.WriteString(s.Success.Render("Todo en orden: el flujo completo está disponible.") + "\n\n")
+	}
+	if m.verificando {
+		b.WriteString(s.Muted.Render("Recalculando...") + "\n\n")
+	}
+	b.WriteString(s.HelpBar.Render(
+		s.Key.Render("[Esc/Enter]") + s.Desc.Render(" volver al menú   ") +
+			s.Key.Render("[C]") + s.Desc.Render(" recalcular")))
 	return s.Box.Render(b.String())
 }
 
@@ -461,9 +591,14 @@ func (m Model) viewDone() string {
 	s := m.styles
 	var b strings.Builder
 	b.WriteString(s.AppTitle.Render(m.taskName) + "\n\n")
-	if m.taskErr != nil {
+	switch {
+	case m.bloqueo:
+		// No es una falla: es la puerta haciendo su trabajo. Se dice qué
+		// hacer, no "error".
+		b.WriteString(s.Warning.Render("! FALTA UN REQUISITO") + "\n\n")
+	case m.taskErr != nil:
 		b.WriteString(s.Error.Render("✖ ERROR: ") + s.Value.Render(m.taskErr.Error()) + "\n\n")
-	} else {
+	default:
 		b.WriteString(s.Success.Render("✔ OK") + "\n\n")
 	}
 	for _, l := range m.lines {
@@ -484,7 +619,12 @@ func renderHelp(s Styles) string {
 		"- assets/backups/sqlserver2014/ -> el .bak de SIDC (SQL 2014).\n" +
 		"- assets/legacy/ocx/ -> los 11 OCX de la PC vieja.\n" +
 		"- assets/oldpc/NOTAS.txt -> DSN, collation, usuarios app.\n\n" +
-		"Teclas: 0-6 ejecutan, flechas+Enter eligen, H ayuda, Q salir.\n"
+		"Teclas: 0-6 ejecutan, flechas+Enter eligen, C checklist, H ayuda, Q salir.\n\n" +
+		"Checklist y desbloqueo:\n\n" +
+		"- C muestra los requisitos de la PC (admin, SysWOW64, Docker, motor, driver ODBC, .bak, base, DSN, Crystal, OCX, archivos de SIDC).\n" +
+		"- Cada uno dice para qué sirve, qué hacer si falta y qué opción del menú traba.\n" +
+		"- Las opciones trabadas se ven en gris con el requisito que falta, y se desbloquean solas al resolverlo.\n" +
+		"- Check y los presets nunca se bloquean: son el diagnóstico y la configuración.\n\n"
 	out, err := glamour.Render(md, "dark")
 	if err != nil {
 		return md
