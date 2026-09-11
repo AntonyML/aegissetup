@@ -236,8 +236,8 @@ func SetupDB(ctx context.Context, cfg config.Config, bakPath, saPass, appPass st
 			return fmt.Errorf("falta AEGIS_SQL_PASSWORD para crear el login %s", cfg.SQLUser)
 		}
 		stmts := []string{
-			fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = '%s') CREATE LOGIN [%s] WITH PASSWORD = '%s', DEFAULT_DATABASE = [%s], DEFAULT_LANGUAGE = us_english, CHECK_POLICY = OFF`,
-				esc(cfg.SQLUser), esc(cfg.SQLUser), escPass(appPass), esc(cfg.Database)),
+			fmt.Sprintf(`IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = '%s') CREATE LOGIN [%s] WITH PASSWORD = '%s', DEFAULT_DATABASE = [%s], DEFAULT_LANGUAGE = us_english, CHECK_POLICY = OFF ELSE ALTER LOGIN [%s] WITH PASSWORD = '%s', DEFAULT_DATABASE = [%s], CHECK_POLICY = OFF`,
+				esc(cfg.SQLUser), esc(cfg.SQLUser), escPass(appPass), esc(cfg.Database), esc(cfg.SQLUser), escPass(appPass), esc(cfg.Database)),
 			fmt.Sprintf(`ALTER LOGIN [%s] ENABLE`, esc(cfg.SQLUser)),
 			fmt.Sprintf(`USE [%s]; IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '%s') BEGIN CREATE USER [%s] FOR LOGIN [%s]; ALTER ROLE db_owner ADD MEMBER [%s]; END`,
 				esc(cfg.Database), esc(cfg.SQLUser), esc(cfg.SQLUser), esc(cfg.SQLUser), esc(cfg.SQLUser)),

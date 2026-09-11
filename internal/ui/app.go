@@ -16,6 +16,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 )
@@ -74,6 +75,7 @@ type Model struct {
 	width    int
 	height   int
 	helpHTML string
+	viewport viewport.Model
 	// secrets son las claves pedidas en el prompt, solo en memoria y solo para
 	// esta corrida. No se escriben a disco: prod nunca guarda claves.
 	secrets  map[string]string
@@ -139,7 +141,9 @@ func NewModel(cfg config.Config, cfgPath string) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = styles.Spinner
-	return Model{cfg: cfg, cfgPath: cfgPath, styles: styles, spinner: sp, secrets: map[string]string{}}
+	vp := viewport.New()
+	vp.MouseWheelEnabled = true
+	return Model{cfg: cfg, cfgPath: cfgPath, styles: styles, spinner: sp, secrets: map[string]string{}, viewport: vp}
 }
 
 // SetPresetServer fija el server del preset "prod server" (flag --server del
@@ -193,12 +197,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		switch m.screen {
+		case screenDone:
+			m = m.refreshViewportContent(m.doneBody(), 4, 2)
+		case screenHelp:
+			m = m.refreshViewportContent(m.helpHTML, 0, 2)
+		case screenChecklist:
+			m = m.refreshViewportContent(m.checklistBody(), 4, 2)
+		}
 		return m, nil
 	case taskFinishedMsg:
 		m.screen = screenDone
 		m.lines = msg.lines
 		m.taskErr = msg.err
 		m.bloqueo = false
+		m = m.setupViewport(m.doneBody(), 4, 2)
 		// Se recalcula el checklist: al terminar un paso se desbloquea el
 		// siguiente, y el operador lo tiene que ver sin pedirlo.
 		m.verificando = true
@@ -206,6 +219,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case checksMsg:
 		m.checks = msg.rs
 		m.verificando = false
+		if m.screen == screenChecklist {
+			m = m.refreshViewportContent(m.checklistBody(), 4, 2)
+		}
 		return m, nil
 	case spinner.TickMsg:
 		if m.screen == screenWorking {
@@ -244,9 +260,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "h", "H", "?":
 				m.screen = screenHelp
 				m.helpHTML = renderHelp(m.styles)
+				m = m.setupViewport(m.helpHTML, 0, 2)
 				return m, nil
 			case "c", "C":
 				m.screen = screenChecklist
+				m = m.setupViewport(m.checklistBody(), 4, 2)
 				return m, nil
 			case "e", "E":
 				return m.pedirPermisos()
@@ -266,7 +284,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "e" || msg.String() == "E" {
 				return m.pedirPermisos()
 			}
-			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "q" || msg.String() == "c" {
+			if (msg.String() == "c" || msg.String() == "C") && m.screen == screenChecklist {
+				m.verificando = true
+				return m, m.runChecks()
+			}
+			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "q" {
 				m.lines = nil
 				m.taskErr = nil
 				m.bloqueo = false
@@ -281,7 +303,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenMenu
 				return m, nil
 			}
-			return m, nil
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
 		case screenWorking:
 			return m, nil
 		}
@@ -530,6 +554,7 @@ func (m Model) aplicarPerfil(a action, server, appDir string) (tea.Model, tea.Cm
 		"",
 		"Ya está midiendo esta config: mirá el checklist con [C].",
 	}
+	m = m.setupViewport(m.doneBody(), 4, 2)
 	m.checks = nil
 	m.verificando = true
 	return m, m.runChecks()
@@ -541,6 +566,7 @@ func (m Model) errorDePerfil(err error) (tea.Model, tea.Cmd) {
 	m.taskName = "PERFIL"
 	m.taskErr = err
 	m.lines = nil
+	m = m.setupViewport(m.doneBody(), 4, 2)
 	return m, nil
 }
 
@@ -621,6 +647,7 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 		m.taskName = nombreDeAccion(a)
 		m.taskErr = nil
 		m.lines = append(arreglosDe(faltan), "", "Resolvé eso y volvé a intentar: el checklist se recalcula solo.")
+		m = m.setupViewport(m.doneBody(), 4, 2)
 		return m, nil
 	}
 	switch a {
@@ -789,7 +816,7 @@ func (m Model) View() tea.View {
 	case screenDone:
 		content = m.viewDone()
 	case screenHelp:
-		content = m.helpHTML
+		content = m.viewHelp()
 	case screenChecklist:
 		content = m.viewChecklist()
 	case screenAsk:
@@ -855,20 +882,9 @@ func (m Model) checklistLine() string {
 	}
 }
 
-// viewChecklist es el detalle: qué falta, por qué importa, qué hacer y qué
-// opción del menú queda trabada. Es el plan de trabajo de la PC.
-func (m Model) viewChecklist() string {
+func (m Model) checklistBody() string {
 	s := m.styles
 	var b strings.Builder
-	b.WriteString(s.AppTitle.Render("CHECKLIST DE LA MAQUINA") + "\n")
-	b.WriteString(s.Subtitle.Render(fmt.Sprintf("env=%s db_mode=%s server=%s db=%s", m.cfg.Env, m.cfg.DbMode, m.cfg.Server, m.cfg.Database)) + "\n\n")
-
-	if m.verificando || len(m.checks) == 0 {
-		b.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), s.Info.Render("Verificando la máquina... consulta el motor SQL, puede tardar unos segundos.")))
-		b.WriteString("\n" + s.HelpBar.Render(s.Key.Render("[Esc]")+s.Desc.Render(" volver al menú")))
-		return s.Box.Render(b.String())
-	}
-
 	for _, r := range m.checks {
 		marca := s.Success.Render(r.Estado.Marca())
 		switch r.Estado {
@@ -889,8 +905,6 @@ func (m Model) viewChecklist() string {
 		b.WriteString("\n")
 	}
 
-	// Se distinguen los dos casos porque se ven iguales en pantalla y no lo son:
-	// en una PC limpia la base y el DSN están en rojo y no traban nada.
 	if bloquean := precheck.Bloqueantes(m.checks); len(bloquean) > 0 {
 		b.WriteString(s.Error.Render(resumenFaltantes(len(bloquean))) + "\n\n")
 	} else if faltan := precheck.Faltantes(m.checks); len(faltan) > 0 {
@@ -901,10 +915,33 @@ func (m Model) viewChecklist() string {
 	if m.verificando {
 		b.WriteString(s.Muted.Render("Recalculando...") + "\n\n")
 	}
-	b.WriteString(s.HelpBar.Render(
-		s.Key.Render("[Esc/Enter]") + s.Desc.Render(" volver al menú   ") +
-			s.Key.Render("[C]") + s.Desc.Render(" recalcular")))
-	return s.Box.Render(b.String())
+	return b.String()
+}
+
+// viewChecklist es el detalle: qué falta, por qué importa, qué hacer y qué
+// opción del menú queda trabada. Es el plan de trabajo de la PC.
+func (m Model) viewChecklist() string {
+	s := m.styles
+	var header strings.Builder
+	header.WriteString(s.AppTitle.Render("CHECKLIST DE LA MAQUINA") + "\n")
+	header.WriteString(s.Subtitle.Render(fmt.Sprintf("env=%s db_mode=%s server=%s db=%s", m.cfg.Env, m.cfg.DbMode, m.cfg.Server, m.cfg.Database)) + "\n\n")
+
+	if m.verificando || len(m.checks) == 0 {
+		header.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), s.Info.Render("Verificando la máquina... consulta el motor SQL, puede tardar unos segundos.")))
+		header.WriteString("\n" + s.HelpBar.Render(s.Key.Render("[Esc]")+s.Desc.Render(" volver al menú")))
+		return s.Box.Render(header.String())
+	}
+
+	footer := s.HelpBar.Render(
+		s.Key.Render("[↑↓/PgUp/PgDn]")+s.Desc.Render(" desplazar   ")+
+			s.Key.Render("[Esc/Enter]")+s.Desc.Render(" volver al menú   ")+
+			s.Key.Render("[C]")+s.Desc.Render(" recalcular   ")+
+			s.Key.Render("[E]")+s.Desc.Render(" permisos"))
+
+	if m.height <= 0 {
+		return s.Box.Render(header.String() + m.checklistBody() + "\n" + footer)
+	}
+	return s.Box.Render(header.String() + m.viewport.View() + "\n\n" + footer)
 }
 
 // viewPerfil es la primera pantalla en una PC sin config. Explica la consecuencia
@@ -1026,25 +1063,83 @@ func (m Model) viewWorking() string {
 	return s.Box.Render(b.String())
 }
 
+func (m Model) setupViewport(content string, headerLines, footerLines int) Model {
+	w := m.width - 6
+	if w < 40 {
+		w = 78
+	}
+	h := m.height - headerLines - footerLines - 4
+	if h < 4 {
+		h = 15
+	}
+	m.viewport.SetWidth(w)
+	m.viewport.SetHeight(h)
+	m.viewport.SetContent(content)
+	m.viewport.GotoTop()
+	return m
+}
+
+func (m Model) refreshViewportContent(content string, headerLines, footerLines int) Model {
+	w := m.width - 6
+	if w < 40 {
+		w = 78
+	}
+	h := m.height - headerLines - footerLines - 4
+	if h < 4 {
+		h = 15
+	}
+	m.viewport.SetWidth(w)
+	m.viewport.SetHeight(h)
+	m.viewport.SetContent(content)
+	return m
+}
+
+func (m Model) doneBody() string {
+	var b strings.Builder
+	for i, l := range m.lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("  " + l)
+	}
+	return b.String()
+}
+
 func (m Model) viewDone() string {
 	s := m.styles
-	var b strings.Builder
-	b.WriteString(s.AppTitle.Render(m.taskName) + "\n\n")
+	var header strings.Builder
+	header.WriteString(s.AppTitle.Render(m.taskName) + "\n\n")
 	switch {
 	case m.bloqueo:
 		// No es una falla: es la puerta haciendo su trabajo. Se dice qué
 		// hacer, no "error".
-		b.WriteString(s.Warning.Render("! FALTA UN REQUISITO") + "\n\n")
+		header.WriteString(s.Warning.Render("! FALTA UN REQUISITO") + "\n\n")
 	case m.taskErr != nil:
-		b.WriteString(s.Error.Render("✖ ERROR: ") + s.Value.Render(m.taskErr.Error()) + "\n\n")
+		header.WriteString(s.Error.Render("✖ ERROR: ") + s.Value.Render(m.taskErr.Error()) + "\n\n")
 	default:
-		b.WriteString(s.Success.Render("✔ OK") + "\n\n")
+		header.WriteString(s.Success.Render("✔ OK") + "\n\n")
 	}
-	for _, l := range m.lines {
-		b.WriteString("  " + l + "\n")
+
+	footer := s.HelpBar.Render(
+		s.Key.Render("[↑↓/PgUp/PgDn]") + s.Desc.Render(" desplazar   ") +
+			s.Key.Render("[Esc/Enter]") + s.Desc.Render(" volver al menú"))
+
+	if m.height <= 0 {
+		return s.Box.Render(header.String() + m.doneBody() + "\n\n" + footer)
 	}
-	b.WriteString("\n" + s.HelpBar.Render(s.Key.Render("[Esc/Enter]")+s.Desc.Render(" volver al menú")))
-	return s.Box.Render(b.String())
+	return s.Box.Render(header.String() + m.viewport.View() + "\n\n" + footer)
+}
+
+func (m Model) viewHelp() string {
+	s := m.styles
+	footer := s.HelpBar.Render(
+		s.Key.Render("[↑↓/PgUp/PgDn]") + s.Desc.Render(" desplazar   ") +
+			s.Key.Render("[Esc/Enter/Q]") + s.Desc.Render(" volver al menú"))
+
+	if m.height <= 0 {
+		return s.Box.Render(m.helpHTML + "\n\n" + footer)
+	}
+	return s.Box.Render(m.viewport.View() + "\n\n" + footer)
 }
 
 func renderHelp(s Styles) string {

@@ -50,5 +50,5 @@ func (m Model) avisoDePermisos(texto string) Model {
 	m.taskErr = nil
 	m.bloqueo = false
 	m.lines = []string{texto}
-	return m
+	return m.setupViewport(m.doneBody(), 4, 2)
 }
