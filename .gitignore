@@ -42,3 +42,7 @@ go.work.sum
 !assets/legacy/crystal/SIDC_CRYSTAL/*.dll
 !assets/legacy/crystal/SIDC_CRYSTAL/*.OCX
 !assets/legacy/ocx/*.OCX
+
+# Database backups (handled externally by backup-agent)
+*.bak
+

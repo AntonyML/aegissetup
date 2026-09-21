@@ -29,10 +29,10 @@ func prodCfg() config.Config {
 	return cfg
 }
 
-// El orden de la instalación completa es un contrato: db -> app -> check.
+// El orden de la instalación de terminal es un contrato: app -> check.
 func TestInstallSeqOrdenFijo(t *testing.T) {
 	got := installSeq()
-	want := []taskKind{taskSetupDB, taskSetupApp, taskCheck}
+	want := []taskKind{taskSetupApp, taskCheck}
 	if len(got) != len(want) {
 		t.Fatalf("pasos = %d, quiero %d: %v", len(got), len(want), got)
 	}
@@ -46,16 +46,6 @@ func TestInstallSeqOrdenFijo(t *testing.T) {
 func TestSecretNeeds(t *testing.T) {
 	none := func(string) bool { return false }
 	all := func(string) bool { return true }
-	only := func(set ...string) func(string) bool {
-		return func(n string) bool {
-			for _, s := range set {
-				if s == n {
-					return true
-				}
-			}
-			return false
-		}
-	}
 
 	cases := []struct {
 		name string
@@ -63,13 +53,9 @@ func TestSecretNeeds(t *testing.T) {
 		set  func(string) bool
 		want []string
 	}{
-		{"dev sin nada -> pide las dos, en orden", devCfg(), none,
-			[]string{envSAPassword, envAppPassword}},
-		{"dev con SA -> pide solo la de la app", devCfg(), only(envSAPassword),
+		{"dev sin nada -> pide solo la de la app", devCfg(), none,
 			[]string{envAppPassword}},
-		{"dev con la app -> pide solo la SA", devCfg(), only(envAppPassword),
-			[]string{envSAPassword}},
-		{"dev con las dos -> no pide nada", devCfg(), all, nil},
+		{"dev con la app -> no pide nada", devCfg(), all, nil},
 		{"prod Windows Auth -> nunca pide nada", prodCfg(), none, nil},
 		{"prod Windows Auth con claves de sobra -> tampoco", prodCfg(), all, nil},
 	}

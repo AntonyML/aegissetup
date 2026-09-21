@@ -125,7 +125,7 @@ func TestBloqueantesNoEsFaltantes(t *testing.T) {
 
 // Etapas arma el texto del "traba:" del checklist.
 func TestEtapasFormatea(t *testing.T) {
-	if got := Etapas(Traba(ReqBackup)); got != "Setup DB, Instalación completa" {
+	if got := Etapas(Traba(ReqBackup)); got != "Setup DB" {
 		t.Errorf("got %q", got)
 	}
 	if got := Etapas(nil); got != "" {
@@ -150,9 +150,9 @@ func TestTodoRequisitoDeRunTieneEntradaEnLaTabla(t *testing.T) {
 	}
 }
 
-// La instalación completa no puede exigir menos que cada paso suelto: si no,
-// alguien pasaría la puerta de un paso y se estrellaría con la grande.
-func TestInstallEsSuperconjuntoDeCadaPaso(t *testing.T) {
+// La instalación de terminal (EtapaInstall) es el aprovisionamiento de puesto (Setup App + Check):
+// exige al menos lo que exige Setup App. Setup DB es independiente y opcional.
+func TestInstallEsSuperconjuntoDeSetupApp(t *testing.T) {
 	install := BloqueantesDe(EtapaInstall)
 	tiene := func(ids []ID, id ID) bool {
 		for _, x := range ids {
@@ -162,11 +162,9 @@ func TestInstallEsSuperconjuntoDeCadaPaso(t *testing.T) {
 		}
 		return false
 	}
-	for _, e := range []Etapa{EtapaSetupDB, EtapaSetupApp} {
-		for _, id := range BloqueantesDe(e) {
-			if !tiene(install, id) {
-				t.Errorf("%s traba %s y no traba la instalación completa", id, e)
-			}
+	for _, id := range BloqueantesDe(EtapaSetupApp) {
+		if !tiene(install, id) {
+			t.Errorf("%s traba Setup App y no traba la instalación", id)
 		}
 	}
 }

@@ -75,7 +75,7 @@ var trabaPorRequisito = map[ID][]Etapa{
 	ReqDocker:  {EtapaSetupDB, EtapaInstall},
 	ReqMotor:   {EtapaSetupDB, EtapaInstall},
 	ReqODBC:    {EtapaInstall},
-	ReqBackup:  {EtapaSetupDB, EtapaInstall},
+	ReqBackup:  {EtapaSetupDB},
 	ReqCrystal: {EtapaInstall},
 	ReqApp:     {EtapaSetupApp, EtapaInstall},
 	ReqOCX:     nil,

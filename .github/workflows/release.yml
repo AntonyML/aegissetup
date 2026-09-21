@@ -89,16 +89,6 @@ jobs:
       - name: 🧪 Verificar runtime embebido
         run: go test ./assets/...
 
-      - name: 📦 Preparar el respaldo del Release
-        shell: pwsh
-        run: |
-          $baks = @(Get-ChildItem assets/backups/sqlserver2014/*.bak)
-          if ($baks.Count -ne 1) {
-            throw "esperaba exactamente 1 .bak versionado en assets/backups/sqlserver2014, encontré $($baks.Count)"
-          }
-          Copy-Item $baks[0].FullName SIDC_2014.bak
-          "{0} -> {1:N1} MB" -f $baks[0].Name, ($baks[0].Length / 1MB)
-
       - name: 🔍 Vet
         run: go vet ./...
 
@@ -127,7 +117,7 @@ jobs:
       - name: 📊 Reportar tamaño de artefactos
         shell: pwsh
         run: |
-          Get-ChildItem -Path bin/aegis.exe, dist/*.exe, SIDC_2014.bak | ForEach-Object {
+          Get-ChildItem -Path bin/aegis.exe, dist/*.exe | ForEach-Object {
             "{0} -> {1:N1} MB" -f $_.Name, ($_.Length / 1MB)
           }
 
@@ -138,7 +128,6 @@ jobs:
           path: |
             dist/*.exe
             bin/aegis.exe
-            SIDC_2014.bak
           retention-days: 30
 
       - name: 🚀 Publicar GitHub Release
@@ -153,14 +142,12 @@ jobs:
             | :--- | :--- | :--- |
             | **`AegisSetup-Setup-v${{ steps.semver.outputs.version }}.exe`** | **Instalador Oficial (Inno Setup)** | **Recomendado para Terminales y Servidores.** Asistente guiado de instalación, accesos directos en Menú de Inicio y Escritorio, registro COM/OCX y desinstalador limpio. |
             | **`aegis.exe`** | **Binario Portable (CLI / TUI)** | Ejecutable puro sin instalación. Ideal para tareas automatizadas, CI/CD o ejecución directa desde terminal. |
-            | **`SIDC_2014.bak`** | **Respaldo de Base de Datos** | Respaldo oficial de SQL Server para restauración automática vía `aegis setup-db`. |
 
             ---
             *Desarrollado para FEMUCARIBE · Costa Rica.*
           files: |
             dist/*.exe
             bin/aegis.exe
-            SIDC_2014.bak
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true

@@ -23,13 +23,14 @@ type action int
 
 const (
 	actInstall action = iota
-	actSetupDB
+	actConfigManual
 	actSetupApp
 	actCheck
 	actPresetDev
 	actPresetProdLocal
 	actPresetProdServer
 	actRefreshLogos
+	actSetupDB
 )
 
 // menuEntry es una entrada del menu del TUI.
@@ -40,9 +41,9 @@ type menuEntry struct {
 	action action
 }
 
-// installSeq es el orden de la instalacion completa. No se elige ni se
-// reordena: es un contrato.
-func installSeq() []taskKind { return []taskKind{taskSetupDB, taskSetupApp, taskCheck} }
+// installSeq es el orden de la instalacion de puesto. No se elige ni se
+// reordena: es un contrato (desacoplado de restaurar .bak).
+func installSeq() []taskKind { return []taskKind{taskSetupApp, taskCheck} }
 
 func stepTitle(k taskKind) string {
 	switch k {
@@ -74,10 +75,8 @@ func secretNeeds(cfg config.Config, isSet func(string) bool) []string {
 		return nil
 	}
 	var out []string
-	for _, n := range []string{envSAPassword, envAppPassword} {
-		if !isSet(n) {
-			out = append(out, n)
-		}
+	if !isSet(envAppPassword) {
+		out = append(out, envAppPassword)
 	}
 	return out
 }

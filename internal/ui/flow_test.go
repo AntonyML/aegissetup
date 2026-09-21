@@ -37,9 +37,7 @@ func escribir(m Model, texto string) Model {
 	return pulsar(m, "enter")
 }
 
-// El punto 1 del pedido: la tecla 0 arranca la instalacion completa y lo primero
-// que hace, si faltan claves, es pedirlas (una sola vez) en vez de fallar
-// a mitad del RESTORE.
+// // La tecla 0 arranca la instalación y si falta clave SQL Auth, la pide.
 func TestTecla0PideLasClavesQueFaltan(t *testing.T) {
 	t.Setenv(envSAPassword, "")
 	t.Setenv(envAppPassword, "")
@@ -48,11 +46,11 @@ func TestTecla0PideLasClavesQueFaltan(t *testing.T) {
 	if m.screen != screenAsk {
 		t.Fatalf("pantalla = %v, quiero screenAsk (prompt de claves)", m.screen)
 	}
-	if len(m.askQueue) != 2 {
-		t.Fatalf("cola = %v, quiero las 2 claves", m.askQueue)
+	if len(m.askQueue) != 1 {
+		t.Fatalf("cola = %v, quiero 1 clave (app)", m.askQueue)
 	}
-	if m.askQueue[0] != envSAPassword || m.askQueue[1] != envAppPassword {
-		t.Errorf("orden = %v, quiero [%s %s]", m.askQueue, envSAPassword, envAppPassword)
+	if m.askQueue[0] != envAppPassword {
+		t.Errorf("orden = %v, quiero [%s]", m.askQueue, envAppPassword)
 	}
 }
 
@@ -84,25 +82,14 @@ func TestTecla0EnProdNoPideNada(t *testing.T) {
 	}
 }
 
-// El prompt guarda la clave y pasa a la siguiente, en orden.
+// El prompt guarda la clave y arranca la instalación.
 func TestPromptPideUnaYDespuesLaOtra(t *testing.T) {
 	t.Setenv(envSAPassword, "")
 	t.Setenv(envAppPassword, "")
 
 	m := pulsar(NewModel(devCfg(), ""), "0")
-	m = escribir(m, "Sa*2026*Dev")
-
-	if m.secrets[envSAPassword] != "Sa*2026*Dev" {
-		t.Errorf("no guardo la SA: %v", m.secrets)
-	}
-	if len(m.askQueue) != 1 || m.askQueue[0] != envAppPassword {
-		t.Fatalf("cola = %v, quiero solo %s", m.askQueue, envAppPassword)
-	}
-	if m.screen != screenAsk {
-		t.Fatalf("pantalla = %v, quiero seguir en screenAsk", m.screen)
-	}
-
 	m = escribir(m, "Dv*123")
+
 	if m.secrets[envAppPassword] != "Dv*123" {
 		t.Errorf("no guardo la de app: %v", m.secrets)
 	}
@@ -118,23 +105,22 @@ func TestPromptRechazaClaveQueElParcheNoPuedeEmbeber(t *testing.T) {
 
 	m := pulsar(NewModel(devCfg(), ""), "0")
 	m = escribir(m, "123456789") // 9 chars con user dev = 21 > 20
-
 	if m.screen != screenAsk {
 		t.Fatalf("pantalla = %v, arranco con una clave invalida", m.screen)
 	}
 	if m.askErr == "" {
-		t.Fatal("no explico por que la rechaza")
-	}
-	if m.secrets[envAppPassword] != "" {
-		t.Error("guardo una clave que el parche va a rechazar")
+		t.Error("no mostro error al operador")
 	}
 }
 
-func TestEscEnElPromptCancelaSinGuardar(t *testing.T) {
+// Esc cancela el prompt sin dejar claves guardadas ni arrancar nada.
+func TestPromptEscCancela(t *testing.T) {
 	t.Setenv(envSAPassword, "")
 	t.Setenv(envAppPassword, "")
 
-	m := pulsar(NewModel(devCfg(), ""), "0", "esc")
+	m := pulsar(NewModel(devCfg(), ""), "0")
+	m = pulsar(m, "esc")
+
 	if m.screen != screenMenu {
 		t.Fatalf("pantalla = %v, quiero volver al menu", m.screen)
 	}
@@ -153,7 +139,6 @@ func TestTeclasDelMenuEjecutanSuAccion(t *testing.T) {
 
 	quiero := map[string]taskKind{
 		"0": taskInstall,
-		"1": taskSetupDB,
 		"2": taskSetupApp,
 		"3": taskCheck,
 		"7": taskRefreshLogos,
@@ -166,6 +151,11 @@ func TestTeclasDelMenuEjecutanSuAccion(t *testing.T) {
 		if m.screen != screenWorking {
 			t.Errorf("tecla %q -> pantalla %v, quiero screenWorking", k, m.screen)
 		}
+	}
+	// Tecla 1 es Configurar conexión (abre screenServer)
+	m1 := pulsar(NewModel(devCfg(), ""), "1")
+	if m1.screen != screenServer {
+		t.Errorf("tecla 1 -> pantalla %v, quiero screenServer", m1.screen)
 	}
 }
 

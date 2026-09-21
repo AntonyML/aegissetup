@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -36,6 +37,7 @@ const (
 	// estamos. Va antes del menú porque el menú ya asume un ambiente.
 	screenPerfil
 	screenServer
+	screenDatabase
 	// screenAppDir pregunta dónde está la carpeta de SIDC. Va después del perfil porque
 	// no es una preferencia sino un dato de esta PC: en una PC limpia no hay de dónde
 	// sacarlo, y el default del desarrollador (C:\DEV\SIDC) hacía que el instalador
@@ -90,6 +92,7 @@ type Model struct {
 	// Vacío = comportamiento por defecto (CONTABILIDAD si la config actual
 	// apunta a localhost, o la config que ya hubiera).
 	presetServer string
+	presetDB     string
 	// checks es el último checklist corrido. Vacío = todavía no corrió y por
 	// eso no se bloquea nada: una sonda que no respondió no puede encerrar al
 	// operador.
@@ -108,6 +111,8 @@ type Model struct {
 	// tiene que ser propiedad del campo, no de por dónde pasó el flujo.
 	srvInput textinput.Model
 	srvErr   string
+	dbInput  textinput.Model
+	dbErr    string
 	// dirInput y dirErr son el prompt de la carpeta de SIDC, y perfilPendiente es el
 	// perfil que se está aplicando mientras se contestan sus preguntas: el server
 	// primero, la carpeta después, y la config se guarda recién cuando no falta ninguna.
@@ -122,13 +127,13 @@ type Model struct {
 }
 
 var menuItems = []menuEntry{
-	{"0", "Instalación completa", "setup-db -> setup-app -> check, de un tirón", actInstall},
-	{"1", "Setup DB", "restaura .bak -> SIDC (compat, logins)", actSetupDB},
+	{"0", "Instalación completa", "Setup App + Check (DSN, OCX, Crystal, Logos, Check)", actInstall},
+	{"1", "Configurar conexión", "Servidor, base de datos, autenticación y carpeta", actConfigManual},
 	{"2", "Setup App", "DSN 32-bit + OCX + verifica app (+parche dev)", actSetupApp},
 	{"3", "Check", "verifica que App y DB se hablan", actCheck},
 	{"4", "Preset dev", "config dev docker localhost,14333", actPresetDev},
-	{"5", "Preset prod local", "config prod misma PC, Windows Auth", actPresetProdLocal},
-	{"6", "Preset prod server", "config prod servidor xxxx, Windows Auth", actPresetProdServer},
+	{"5", "Preset FEMUCARIBE", "FEMUCARIBE\\AdministradorRed, Windows Auth, SIDC", actPresetProdLocal},
+	{"6", "Preset prod server", "config prod servidor en la red, Windows Auth", actPresetProdServer},
 	{"7", "Refrescar logos", "actualiza .exe y Reportes/ desde Fotos/Principal.jpg", actRefreshLogos},
 }
 
@@ -138,8 +143,8 @@ var menuItems = []menuEntry{
 // regla de ambiente el arranque y el menú dejarían configs distintas.
 var perfiles = []menuEntry{
 	{"1", "Pruebas", "SQL Server 2019 en Docker, en esta misma PC", actPresetDev},
-	{"2", "Producción en esta PC", "SIDC y SQL Server locales, Windows Auth", actPresetProdLocal},
-	{"3", "Producción en un servidor", "SQL Server en otra PC de la red", actPresetProdServer},
+	{"2", "Servidor FEMUCARIBE", "FEMUCARIBE\\AdministradorRed, Windows Auth, SIDC", actPresetProdLocal},
+	{"3", "Producción en otro servidor", "SQL Server en otra PC de la red", actPresetProdServer},
 }
 
 // NewModel crea el modelo TUI con la config cargada.
@@ -270,6 +275,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePerfil(msg)
 		case screenServer:
 			return m.updateServer(msg)
+		case screenDatabase:
+			return m.updateDatabase(msg)
 		case screenAppDir:
 			return m.updateAppDir(msg)
 		case screenMenu:
@@ -405,6 +412,10 @@ func (m Model) elegirPerfil(p menuEntry) (tea.Model, tea.Cmd) {
 // medio contestar no puede quedar escrito en disco.
 func (m Model) aplicarPreset(a action) (tea.Model, tea.Cmd) {
 	m.perfilPendiente = a
+	if a == actConfigManual {
+		m.presetServer = ""
+		m.presetDB = ""
+	}
 	return m.siguientePregunta("")
 }
 
@@ -413,10 +424,16 @@ func (m Model) aplicarPreset(a action) (tea.Model, tea.Cmd) {
 // dichos: el camino no interactivo pasa de largo por las dos preguntas.
 func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
 	a := m.perfilPendiente
-	if a == actPresetProdServer && m.presetServer == "" {
+	if (a == actPresetProdServer || a == actConfigManual) && m.presetServer == "" {
 		m.srvInput = newServerInput(m.sugerenciaServer())
 		m.srvErr = ""
 		m.screen = screenServer
+		return m, nil
+	}
+	if a == actConfigManual && m.presetDB == "" {
+		m.dbInput = newDatabaseInput(m.sugerenciaDatabase())
+		m.dbErr = ""
+		m.screen = screenDatabase
 		return m, nil
 	}
 	if appDir == "" {
@@ -434,16 +451,34 @@ func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
 
 // sugerenciaServer es lo único que podemos ofrecer como ejemplo. No se precarga en
 // el campo a propósito: un valor precargado se guarda tal cual sin que el operador
-// lo lea, que es exactamente cómo se cuela un CONTABILIDAD equivocado.
+// lo lea, que es exactamente cómo se cuela un valor equivocado.
 func (m Model) sugerenciaServer() string {
 	if m.presetServer != "" {
 		return m.presetServer
 	}
 	s := m.cfg.Server
 	if s == "" || strings.HasPrefix(s, "localhost") || strings.HasPrefix(s, ".") || s == "127.0.0.1" {
-		return "CONTABILIDAD"
+		return `FEMUCARIBE\AdministradorRed`
 	}
 	return s
+}
+
+func (m Model) sugerenciaDatabase() string {
+	if m.presetDB != "" {
+		return m.presetDB
+	}
+	if m.cfg.Database != "" {
+		return m.cfg.Database
+	}
+	return "SIDC"
+}
+
+func newDatabaseInput(sugerencia string) textinput.Model {
+	ti := newServerInput(sugerencia)
+	if sugerencia != "" {
+		ti.SetValue(sugerencia)
+	}
+	return ti
 }
 
 func newServerInput(sugerencia string) textinput.Model {
@@ -530,6 +565,35 @@ func (m Model) updateServer(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+var dbValidRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+func (m Model) updateDatabase(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.dbErr = ""
+		if m.primeraVez {
+			m.screen = screenPerfil
+			return m, nil
+		}
+		m.screen = screenMenu
+		return m, nil
+	case "enter":
+		db := strings.TrimSpace(m.dbInput.Value())
+		if db == "" {
+			db = "SIDC"
+		}
+		if !dbValidRe.MatchString(db) {
+			m.dbErr = "Nombre de base de datos inválido (solo letras, números y guión bajo)."
+			return m, nil
+		}
+		m.presetDB = db
+		return m.siguientePregunta("")
+	}
+	var cmd tea.Cmd
+	m.dbInput, cmd = m.dbInput.Update(msg)
+	return m, cmd
+}
+
 // updateAppDir pregunta dónde está la carpeta de SIDC. Valida antes de guardar: una ruta
 // relativa se resolvería contra el directorio de trabajo del proceso, así que la misma
 // config mediría carpetas distintas según desde dónde se lance Aegis.
@@ -574,12 +638,21 @@ func (m Model) aplicarPerfil(a action, server, appDir string) (tea.Model, tea.Cm
 	if err != nil {
 		return m.errorDePerfil(err)
 	}
+	if m.presetDB != "" {
+		cfg.Database = m.presetDB
+		if err := cfg.Validate(); err != nil {
+			return m.errorDePerfil(err)
+		}
+	}
 	if err := cfg.Save(m.cfgPath); err != nil {
 		return m.errorDePerfil(err)
 	}
 	m.cfg = cfg
+	m.presetServer = ""
+	m.presetDB = ""
 	m.primeraVez = false
 	m.srvErr = ""
+	m.dbErr = ""
 	m.dirErr = ""
 	m.bloqueo = false
 	m.taskErr = nil
@@ -589,7 +662,7 @@ func (m Model) aplicarPerfil(a action, server, appDir string) (tea.Model, tea.Cm
 	m.cursor = 0
 	m.lines = []string{
 		fmt.Sprintf("config guardada en %s", m.cfgPath),
-		fmt.Sprintf("env=%s db_mode=%s server=%s auth=%s", cfg.Env, cfg.DbMode, cfg.Server, authLabel(cfg)),
+		fmt.Sprintf("env=%s db_mode=%s server=%s db=%s auth=%s", cfg.Env, cfg.DbMode, cfg.Server, cfg.Database, authLabel(cfg)),
 		fmt.Sprintf("app_dir=%s", cfg.AppDir),
 		"",
 		"Ya está midiendo esta config: mirá el checklist con [C].",
@@ -704,7 +777,7 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 		return m.startTask(taskCheck, stepTitle(taskCheck))
 	case actRefreshLogos:
 		return m.startTask(taskRefreshLogos, stepTitle(taskRefreshLogos))
-	case actPresetDev, actPresetProdLocal, actPresetProdServer:
+	case actPresetDev, actPresetProdLocal, actPresetProdServer, actConfigManual:
 		// Los presets preguntan lo que no se puede adivinar: el nombre del servidor en
 		// prod server y, en cualquiera, dónde está la carpeta de SIDC. Un servidor
 		// adivinado se ve igual de válido que uno real hasta que falla la conexión, y
@@ -865,6 +938,12 @@ func presetConfig(cfg config.Config, a action, presetServer, appDir string) (con
 			cfg.Server = "CONTABILIDAD"
 		}
 		cfg.UseWinAuth, cfg.Driver = true, "SQL Server"
+	case actConfigManual:
+		cfg.Env, cfg.DbMode = "prod", config.DbServer
+		if presetServer != "" {
+			cfg.Server = presetServer
+		}
+		cfg.UseWinAuth, cfg.Driver = true, "SQL Server"
 	}
 	if appDir != "" {
 		cfg.AppDir = appDir
@@ -892,6 +971,8 @@ func (m Model) View() tea.View {
 		content = m.viewPerfil()
 	case screenServer:
 		content = m.viewServer()
+	case screenDatabase:
+		content = m.viewDatabase()
 	case screenAppDir:
 		content = m.viewAppDir()
 	default:
@@ -1065,6 +1146,30 @@ func (m Model) viewServer() string {
 		{"192.168.1.50", "por IP, si no resuelve por nombre"},
 		{`SIDC01\SQLEXPRESS`, "instancia con nombre (SQL Express)"},
 		{"SIDC01,1433", "puerto explícito, si no es el 1433"},
+	} {
+		b.WriteString("  " + s.Value.Render(e[0]) + "  " + s.Muted.Render(e[1]) + "\n")
+	}
+	b.WriteString("\n" + s.HelpBar.Render(
+		s.Key.Render("[Enter]")+s.Desc.Render(" aceptar   ")+
+			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
+	return s.Box.Render(b.String())
+}
+
+// viewDatabase pide el nombre de la base de datos para apuntar SIDC a cualquier base.
+func (m Model) viewDatabase() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("BASE DE DATOS DE SIDC") + "\n\n")
+	b.WriteString(s.Value.Render("¿Nombre de la base de datos?") + "\n\n")
+	b.WriteString("  " + m.dbInput.View() + "\n")
+	if m.dbErr != "" {
+		b.WriteString("\n" + s.Error.Render("✖ ") + s.Value.Render(m.dbErr) + "\n")
+	}
+	b.WriteString("\n" + s.SectionHeader.Render("EJEMPLOS") + "\n")
+	for _, e := range [][2]string{
+		{"SIDC", "nombre estándar de la base en producción"},
+		{"SIDC_PRUEBAS", "base de pruebas o desarrollo"},
+		{"SIDC2014", "versión histórica"},
 	} {
 		b.WriteString("  " + s.Value.Render(e[0]) + "  " + s.Muted.Render(e[1]) + "\n")
 	}

@@ -135,15 +135,12 @@ func TestFaltaTrabaYQuedaEnLaLista(t *testing.T) {
 	}
 }
 
-// La instalación completa no puede exigir menos que cada paso suelto: si no,
-// alguien pasaría la puerta del paso por separado y se estrellaría con la grande.
-func TestLaPuertaDeLaInstalacionCubreLaDeCadaPaso(t *testing.T) {
+// La instalación de terminal (actInstall) exige todo lo que exige Setup App.
+func TestLaPuertaDeLaInstalacionCubreSetupApp(t *testing.T) {
 	grande := gate(actInstall)
-	for _, paso := range []action{actSetupDB, actSetupApp} {
-		for _, id := range gate(paso) {
-			if !tieneID(grande, id) {
-				t.Errorf("la instalación completa no exige %q, que sí exige %q", id, nombreDeAccion(paso))
-			}
+	for _, id := range gate(actSetupApp) {
+		if !tieneID(grande, id) {
+			t.Errorf("la instalación de terminal no exige %q, que sí exige %q", id, nombreDeAccion(actSetupApp))
 		}
 	}
 }
@@ -164,10 +161,10 @@ func TestTodoIDDePuertaExisteEnElChecklist(t *testing.T) {
 	}
 }
 
-// La base y el DSN son el resultado del flujo, no su entrada. Exigirlos como
-// requisito previo sería circular: "no puedo crear la base porque no existe la base".
+// La base, el DSN y el backup no traban ninguna acción: la base y el DSN son el
+// resultado del flujo, y los backups corresponden a backup-agent.
 func TestBaseYDSNNoTrabasNingunaAccion(t *testing.T) {
-	for _, id := range []precheck.ID{precheck.ReqBase, precheck.ReqDSN} {
+	for _, id := range []precheck.ID{precheck.ReqBase, precheck.ReqDSN, precheck.ReqBackup} {
 		if deps := accionesQueDependenDe(id); len(deps) != 0 {
 			t.Errorf("%q traba %v: son el resultado del flujo, no un requisito previo", id, deps)
 		}
@@ -175,20 +172,13 @@ func TestBaseYDSNNoTrabasNingunaAccion(t *testing.T) {
 }
 
 func TestDependenciasDeUnRequisito(t *testing.T) {
-	deps := strings.Join(accionesQueDependenDe(precheck.ReqBackup), " | ")
-	for _, esperado := range []string{"Instalación completa", "Setup DB"} {
-		if !strings.Contains(deps, esperado) {
-			t.Errorf("el respaldo traba %q, debería trabar %q", deps, esperado)
-		}
-	}
-
 	// Crystal lo instala Setup App: exigirlo antes sería dejar al operador sin
 	// ninguna acción que lo resuelva.
 	if deps := strings.Join(accionesQueDependenDe(precheck.ReqCrystal), " | "); strings.Contains(deps, "Setup App") {
 		t.Errorf("Crystal no puede trabar Setup App, y traba: %q", deps)
 	}
 
-	if deps := accionesQueDependenDe(precheck.ReqAdmin); len(deps) < 3 {
+	if deps := accionesQueDependenDe(precheck.ReqAdmin); len(deps) < 2 {
 		t.Errorf("sin permisos no se puede nada, y solo traba: %v", deps)
 	}
 }
@@ -204,7 +194,7 @@ func TestResumenDelChecklist(t *testing.T) {
 		t.Errorf("con todo OK: %q", got)
 	}
 
-	uno := resumenChecklist(checklistFalso(config.DbDocker, precheck.ReqBackup), false)
+	uno := resumenChecklist(checklistFalso(config.DbDocker, precheck.ReqAdmin), false)
 	if !strings.Contains(uno, "1 bloquea") || strings.Contains(uno, "1 bloquean") {
 		t.Errorf("singular mal formado: %q", uno)
 	}
@@ -212,7 +202,7 @@ func TestResumenDelChecklist(t *testing.T) {
 		t.Errorf("no dice cómo ver el detalle: %q", uno)
 	}
 
-	muchos := resumenChecklist(checklistFalso(config.DbDocker, precheck.ReqBackup, precheck.ReqApp), false)
+	muchos := resumenChecklist(checklistFalso(config.DbDocker, precheck.ReqAdmin, precheck.ReqApp), false)
 	if !strings.Contains(muchos, "2 bloquean") {
 		t.Errorf("plural mal formado: %q", muchos)
 	}
@@ -234,8 +224,8 @@ func TestOpcionTrabadaExplicaEnVezDeArrancar(t *testing.T) {
 	t.Setenv(envAppPassword, "")
 
 	m := NewModel(devCfg(), "")
-	m.checks = checklistFalso(config.DbDocker, precheck.ReqMotor, precheck.ReqBackup)
-	m = pulsar(m, "1") // Setup DB
+	m.checks = checklistFalso(config.DbDocker, precheck.ReqAdmin)
+	m = pulsar(m, "2") // Setup App
 
 	if m.screen != screenDone {
 		t.Fatalf("pantalla = %v, quiero la explicación en screenDone", m.screen)
@@ -249,11 +239,11 @@ func TestOpcionTrabadaExplicaEnVezDeArrancar(t *testing.T) {
 	if m.task != taskNone {
 		t.Errorf("arrancó la tarea igual: %v", m.task)
 	}
-	if m.taskName != "Setup DB" {
+	if m.taskName != "Setup App" {
 		t.Errorf("no dijo qué opción se bloqueó: %q", m.taskName)
 	}
 	junto := strings.Join(m.lines, "\n")
-	for _, esperado := range []string{"Motor SQL", "Respaldo .bak", "docker compose"} {
+	for _, esperado := range []string{"Permisos de administrador"} {
 		if !strings.Contains(junto, esperado) {
 			t.Errorf("no dijo qué hacer (%q). Texto:\n%s", esperado, junto)
 		}
@@ -267,10 +257,10 @@ func TestOpcionDesbloqueadaArranca(t *testing.T) {
 
 	m := NewModel(devCfg(), "")
 	m.checks = checklistFalso(config.DbDocker)
-	m = pulsar(m, "1")
+	m = pulsar(m, "2")
 
-	if m.screen != screenWorking || m.task != taskSetupDB {
-		t.Fatalf("pantalla=%v tarea=%v, quiero que arranque Setup DB", m.screen, m.task)
+	if m.screen != screenWorking || m.task != taskSetupApp {
+		t.Fatalf("pantalla=%v tarea=%v, quiero que arranque Setup App", m.screen, m.task)
 	}
 	if m.bloqueo {
 		t.Error("quedó marcado como bloqueo con el checklist limpio")
@@ -316,13 +306,13 @@ func TestAlTerminarUnPasoSeRecalculaElChecklist(t *testing.T) {
 
 func TestChecklistEnPantallaMuestraArregloYTraba(t *testing.T) {
 	m := NewModel(devCfg(), "")
-	m.checks = checklistFalso(config.DbDocker, precheck.ReqBackup)
+	m.checks = checklistFalso(config.DbDocker, precheck.ReqAdmin)
 	m.screen = screenChecklist
 
 	c := m.View().Content
 	for _, esperado := range []string{
-		"Respaldo .bak",                  // el requisito
-		"no hay .bak en ninguna carpeta", // el detalle de la sonda
+		"Permisos de administrador", // el requisito
+		"sesión sin elevar",
 		"por qué:", "arreglo:", "traba:",
 		"Falta 1",
 	} {
@@ -348,18 +338,18 @@ func TestChecklistMientrasVerificaNoMiente(t *testing.T) {
 // El menú tiene que mostrar la puerta antes de que el operador la choque.
 func TestMenuMuestraLaPuerta(t *testing.T) {
 	m := NewModel(devCfg(), "")
-	m.checks = checklistFalso(config.DbDocker, precheck.ReqBackup)
+	m.checks = checklistFalso(config.DbDocker, precheck.ReqAdmin)
 	c := m.View().Content
 
 	if !strings.Contains(c, "CHECKLIST: 1 bloquea") {
 		t.Errorf("el menú no resume el bloqueo:\n%s", c)
 	}
-	if !strings.Contains(c, "falta: Respaldo .bak disponible") {
+	if !strings.Contains(c, "falta: Permisos de administrador") {
 		t.Errorf("el menú no dice qué opción está trabada y por qué:\n%s", c)
 	}
-	// Setup App no depende del respaldo: no puede aparecer trabada.
+	// Permisos de administrador traba Instalación completa y Setup App
 	if strings.Count(c, "(falta:") != 2 {
-		t.Errorf("esperaba 2 opciones trabadas (Instalación completa y Setup DB):\n%s", c)
+		t.Errorf("esperaba 2 opciones trabadas (Instalación completa y Setup App):\n%s", c)
 	}
 }
 

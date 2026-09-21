@@ -151,9 +151,8 @@ func (c Config) Validate() error {
 	if c.Compat != 110 && c.Compat != 120 && c.Compat != 130 && c.Compat != 140 && c.Compat != 150 && c.Compat != 160 {
 		return fmt.Errorf("config: compat %d no válido (110|120|130|140|150|160)", c.Compat)
 	}
-	if c.BackupDir == "" {
-		return fmt.Errorf("config: backup_dir vacío (es la carpeta donde se deja el .bak)")
-	}
+	// backup_dir es opcional: el aprovisionamiento de terminales no depende de .bak
+	// (la gestión de respaldos corresponde a backup-agent).
 	// app_dir puede estar vacío: es la PC recién instalada donde todavía nadie dijo
 	// dónde está SIDC, y quien lo pide es el perfil del TUI (o --app-dir). Pero si
 	// viene, tiene que ser absoluta: una ruta relativa se resuelve contra el directorio
