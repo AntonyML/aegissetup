@@ -156,6 +156,7 @@ func TestTeclasDelMenuEjecutanSuAccion(t *testing.T) {
 		"1": taskSetupDB,
 		"2": taskSetupApp,
 		"3": taskCheck,
+		"7": taskRefreshLogos,
 	}
 	for k, want := range quiero {
 		m := pulsar(NewModel(devCfg(), ""), k)

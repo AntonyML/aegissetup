@@ -29,6 +29,7 @@ const (
 	actPresetDev
 	actPresetProdLocal
 	actPresetProdServer
+	actRefreshLogos
 )
 
 // menuEntry es una entrada del menu del TUI.
@@ -53,6 +54,8 @@ func stepTitle(k taskKind) string {
 		return "CHECK"
 	case taskInstall:
 		return "INSTALACIÓN COMPLETA"
+	case taskRefreshLogos:
+		return "REFRESCAR LOGOS"
 	}
 	return "?"
 }

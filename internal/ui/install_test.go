@@ -93,8 +93,8 @@ func TestSecretNeeds(t *testing.T) {
 // quedó escrito en 3 lugares y ninguno coincidía con el menú de verdad. Este test
 // falla si alguien vuelve a atar el despacho al índice en vez de a la acción.
 func TestMenuItemsContrato(t *testing.T) {
-	if len(menuItems) != 7 {
-		t.Fatalf("entradas = %d, quiero 7 (0..6)", len(menuItems))
+	if len(menuItems) != 8 {
+		t.Fatalf("entradas = %d, quiero 8 (0..7)", len(menuItems))
 	}
 
 	keys := map[string]bool{}
@@ -126,13 +126,18 @@ func TestMenuItemsContrato(t *testing.T) {
 	if !actions[actInstall] {
 		t.Error("no existe ninguna entrada con actInstall")
 	}
+	if !actions[actRefreshLogos] {
+		t.Error("no existe ninguna entrada con actRefreshLogos")
+	}
 }
 
 func TestStepTitle(t *testing.T) {
 	cases := map[taskKind]string{
-		taskSetupDB:  "SETUP DB",
-		taskSetupApp: "SETUP APP",
-		taskCheck:    "CHECK",
+		taskSetupDB:      "SETUP DB",
+		taskSetupApp:     "SETUP APP",
+		taskCheck:        "CHECK",
+		taskInstall:      "INSTALACIÓN COMPLETA",
+		taskRefreshLogos: "REFRESCAR LOGOS",
 	}
 	for k, want := range cases {
 		if got := stepTitle(k); got != want {

@@ -102,6 +102,9 @@ func ejecutarSetupApp(cfg config.Config, o setupAppOpts, out func(string)) error
 	for _, f := range InstalarCrystal(out) {
 		out("CRYSTAL PENDIENTE: " + f)
 	}
+	if err := setup.PatchAppLogos(cfg.AppDir, out); err != nil {
+		out("AVISO LOGOS: " + err.Error())
+	}
 	if o.patch && !cfg.UseWinAuth {
 		// Mismo corte que el TUI: parchear con clave vacía deja un _DOCKER.exe que
 		// arranca y falla al conectar, que es peor que no generarlo.

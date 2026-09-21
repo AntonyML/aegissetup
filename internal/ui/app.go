@@ -49,6 +49,7 @@ const (
 	taskSetupApp
 	taskCheck
 	taskInstall
+	taskRefreshLogos
 )
 
 type taskFinishedMsg struct {
@@ -123,6 +124,7 @@ var menuItems = []menuEntry{
 	{"4", "Preset dev", "config dev docker localhost,14333", actPresetDev},
 	{"5", "Preset prod local", "config prod misma PC, Windows Auth", actPresetProdLocal},
 	{"6", "Preset prod server", "config prod servidor xxxx, Windows Auth", actPresetProdServer},
+	{"7", "Refrescar logos", "actualiza .exe y Reportes/ desde Fotos/Principal.jpg", actRefreshLogos},
 }
 
 // perfiles es la primera pregunta en una PC sin config: en qué PC estamos. Son las
@@ -662,6 +664,8 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 		return m.startTask(taskSetupApp, stepTitle(taskSetupApp))
 	case actCheck:
 		return m.startTask(taskCheck, stepTitle(taskCheck))
+	case actRefreshLogos:
+		return m.startTask(taskRefreshLogos, stepTitle(taskRefreshLogos))
 	case actPresetDev, actPresetProdLocal, actPresetProdServer:
 		// Los presets preguntan lo que no se puede adivinar: el nombre del servidor en
 		// prod server y, en cualquiera, dónde está la carpeta de SIDC. Un servidor
@@ -747,6 +751,9 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 		// El runtime de Crystal sale del propio binario: en una PC limpia no hay
 		// carpeta de instalación de Crystal Reports que copiar.
 		instalarCrystal(emit)
+		if err := setup.PatchAppLogos(cfg.AppDir, emit); err != nil {
+			emit("AVISO LOGOS: " + err.Error())
+		}
 		if !cfg.UseWinAuth {
 			if appPass == "" {
 				return fmt.Errorf("falta %s para el parche _DOCKER", envAppPassword)
@@ -769,6 +776,25 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 			// Antes esto no era error y el TUI mostraba "OK" con el check en
 			// rojo: el operador se enteraba al reves.
 			return fmt.Errorf("check: %d fallo(s)", fails)
+		}
+		return nil
+
+	case taskRefreshLogos:
+		if cfg.AppDir == "" {
+			return fmt.Errorf("app_dir sin configurar (elegí perfil o pasá --app-dir)")
+		}
+		emit(fmt.Sprintf("Carpeta SIDC: %s", cfg.AppDir))
+		if err := setup.PatchAppAndReports(cfg.AppDir, emit); err != nil {
+			return err
+		}
+		if !cfg.UseWinAuth {
+			appPass := secret(envAppPassword)
+			if appPass == "" {
+				appPass = os.Getenv(envAppPassword)
+			}
+			if appPass != "" {
+				_ = parcheDocker(cfg.AppDir, cfg.SQLUser, appPass, emit)
+			}
 		}
 		return nil
 	}
@@ -1164,7 +1190,7 @@ func renderHelp(s Styles) string {
 		"- [E] pide permisos y relanza Aegis elevado; check, checklist y dashboard nunca los piden.\n" +
 		"- Desde la consola, setup-db y setup-app se elevan solos (el padre espera y devuelve el mismo código).\n" +
 		"- AEGIS_NO_ELEVAR=1 corta el reintento en el proceso ya elevado.\n\n" +
-		"Teclas: 0-6 ejecutan, flechas+Enter eligen, C checklist, E permisos, H ayuda, Q salir.\n\n" +
+		"Teclas: 0-7 ejecutan, flechas+Enter eligen, C checklist, E permisos, H ayuda, Q salir.\n\n" +
 		"Checklist y desbloqueo:\n\n" +
 		"- C muestra los requisitos de la PC (admin, SysWOW64, Docker, motor, driver ODBC, .bak, base, DSN, Crystal, OCX, archivos de SIDC).\n" +
 		"- Cada uno dice para qué sirve, qué hacer si falta y qué opción del menú traba.\n" +

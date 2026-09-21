@@ -3,6 +3,9 @@ package setup
 
 import (
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -289,11 +292,80 @@ func PatchDockerExe(appDir, user, pass string, out func(string)) error {
 	if count == 0 {
 		return fmt.Errorf("no se encontró el string en el exe (¿ya está parchado o es otra versión?)")
 	}
+
+	// Si existe Fotos/Principal.jpg, actualizamos los logos en _DOCKER.exe
+	if logoPath := PrincipalLogoPath(appDir); logoPath != "" {
+		if logoFile, err := os.Open(logoPath); err == nil {
+			if img, _, err := image.Decode(logoFile); err == nil {
+				if patched, rep, err := PatchLogos(data, img); err == nil && rep.Total() > 0 {
+					data = patched
+					out(fmt.Sprintf("Logos actualizados en _DOCKER.exe (%d imágenes, %d etiquetas)",
+						rep.FormLogos+rep.Backgrounds+rep.Splashes, rep.Labels))
+				}
+			}
+			logoFile.Close()
+		}
+	}
+
 	if err := os.WriteFile(dst, data, 0644); err != nil {
 		return err
 	}
 	out(fmt.Sprintf("_DOCKER.exe OK (%d parche) -> %s", count, dst))
 	return nil
+}
+
+// PrincipalLogoPath devuelve la ruta a Fotos/Principal.jpg si existe.
+// Esta es la única fuente oficial de logos para la app y los reportes.
+func PrincipalLogoPath(appDir string) string {
+	p := filepath.Join(appDir, "Fotos", "Principal.jpg")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return ""
+}
+
+// PatchAppAndReports actualiza los logos en el ejecutable y en todas las plantillas
+// de Crystal Reports (.rpt) usando exclusivamente Fotos/Principal.jpg.
+func PatchAppAndReports(appDir string, out func(string)) error {
+	logoPath := PrincipalLogoPath(appDir)
+	if logoPath == "" {
+		return nil
+	}
+
+	logoFile, err := os.Open(logoPath)
+	if err != nil {
+		return fmt.Errorf("abriendo %s: %w", logoPath, err)
+	}
+	defer logoFile.Close()
+
+	img, _, err := image.Decode(logoFile)
+	if err != nil {
+		return fmt.Errorf("decodificando %s: %w", logoPath, err)
+	}
+
+	// 1. Parchear ejecutable principal si existe
+	exe := filepath.Join(appDir, "Sistema Intergrado de Controles y Presupuesto.exe")
+	if data, err := os.ReadFile(exe); err == nil {
+		if patched, rep, err := PatchLogos(data, img); err == nil && rep.Total() > 0 {
+			if err := os.WriteFile(exe, patched, 0644); err == nil {
+				out(fmt.Sprintf("Logos SIDC actualizados en %s (%d imágenes, %d etiquetas)",
+					filepath.Base(exe), rep.FormLogos+rep.Backgrounds+rep.Splashes, rep.Labels))
+			}
+		}
+	}
+
+	// 2. Parchear plantillas de Crystal Reports en Reportes/
+	repDir := filepath.Join(appDir, "Reportes")
+	if _, err := os.Stat(repDir); err == nil {
+		_, _ = PatchReportsLogos(repDir, img, out)
+	}
+
+	return nil
+}
+
+// PatchAppLogos es un alias para PatchAppAndReports por compatibilidad con llamadores existentes.
+func PatchAppLogos(appDir string, out func(string)) error {
+	return PatchAppAndReports(appDir, out)
 }
 
 func utf16le(s string) []byte {
