@@ -229,4 +229,3 @@ func TestPatchAppAndReportsMissingFiles(t *testing.T) {
 		t.Errorf("se esperaba al menos un aviso informativo, logs: %v", logs)
 	}
 }
-

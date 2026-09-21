@@ -1,4 +1,4 @@
-name: release
+name: Build and Release Installer
 
 on:
   push:
@@ -18,40 +18,69 @@ permissions:
 
 jobs:
   build-and-release:
-    name: 🚀 Build & Release
+    name: 🚀 Build, Package & Release
     runs-on: windows-latest
 
     steps:
-      - name: ⬇️ Checkout
+      - name: ⬇️ Checkout Código Fuente
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 📐 Resolver versión y etiqueta
-        id: version
+      - name: 📐 Calcular Próxima Versión Semántica
+        id: semver
         shell: pwsh
         run: |
-          $rawTags = @(git tag --list "v*.*.*" --sort=-v:refname)
-          $latestTag = if ($rawTags.Count -gt 0 -and $rawTags[0]) { $rawTags[0].Trim() } else { "v0.1.0" }
-
-          if ($env:GITHUB_REF -like "refs/tags/*") {
-            $tag = $env:GITHUB_REF -replace "refs/tags/", ""
-            $version = $tag.TrimStart("v")
+          $exactTag = (git tag --points-at HEAD) | Where-Object { $_ -match "^v\d" } | Select-Object -First 1
+          if ($exactTag) {
+            $version = $exactTag.TrimStart('v')
+            $versionTag = $exactTag
           } else {
-            $clean = $latestTag.TrimStart("v")
-            $parts = $clean.Split(".")
-            $major = if ($parts.Count -gt 0 -and $parts[0]) { [int]$parts[0] } else { 0 }
-            $minor = if ($parts.Count -gt 1 -and $parts[1]) { [int]$parts[1] } else { 1 }
-            $patch = if ($parts.Count -gt 2 -and $parts[2]) { [int]$parts[2] + 1 } else { 1 }
-            $version = "$major.$minor.$patch"
-            $tag = "v$version"
+            $latestTag = (git tag -l "v*" --sort=-v:refname) | Select-Object -First 1
+            if (-not $latestTag) {
+              $version = "1.0.0"
+            } else {
+              $clean = $latestTag.TrimStart('v')
+              $parts = $clean.Split('.')
+              $major = [int]$parts[0]
+              $minor = [int]$parts[1]
+              $patch = [int]$parts[2]
+
+              $commits = git log "$latestTag..HEAD" --oneline
+              $isMajor = $false
+              $isMinor = $false
+              $hasCommits = $false
+
+              foreach ($c in $commits) {
+                if (-not [string]::IsNullOrWhiteSpace($c)) {
+                  $hasCommits = $true
+                  if ($c -match "(?i)BREAKING CHANGE|breaking:") {
+                    $isMajor = $true
+                  } elseif ($c -match "(?i)feat(\([^\)]+\))?:") {
+                    $isMinor = $true
+                  }
+                }
+              }
+
+              if ($isMajor) {
+                $major++
+                $minor = 0
+                $patch = 0
+              } elseif ($isMinor) {
+                $minor++
+                $patch = 0
+              } elseif ($hasCommits) {
+                $patch++
+              }
+              $version = "$major.$minor.$patch"
+            }
+            $versionTag = "v$version"
           }
+          Write-Host "✅ Versión calculada: $version (Tag: $versionTag)"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version_tag=$versionTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-          "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "✅ Tag a generar: $tag (versión $version)"
-
-      - name: 🔧 Setup Go
+      - name: 🔧 Configurar Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -76,99 +105,64 @@ jobs:
       - name: 🧪 Tests
         run: go test ./...
 
-      - name: 🏗️ Build
-        run: go build -trimpath -ldflags "-s -w" -o aegis.exe ./cmd/aegis
-
-      - name: 📊 Reportar tamaño del binario
+      - name: 🏗️ Compilar Binario Go con Versión Inyectada
         shell: pwsh
         run: |
-          $exe = Get-Item aegis.exe
-          "{0} -> {1:N1} MB" -f $exe.Name, ($exe.Length / 1MB)
+          New-Item -ItemType Directory -Force -Path bin
+          $ver = "${{ steps.semver.outputs.version }}"
+          Write-Host "Compilando Aegis Setup versión $ver..."
+          go build -v -trimpath -ldflags="-s -w -X aegis-setup/internal/version.Current=$ver" -o bin/aegis.exe ./cmd/aegis
 
-      - name: ⚡ Subir mirrors (GoFile + Catbox)
+      - name: 🛠️ Instalar Inno Setup
+        run: choco install innosetup --no-progress
+
+      - name: 📦 Compilar Instalador con Inno Setup
         shell: pwsh
         run: |
-          $gofileUrl = ""
-          try {
-            Write-Host "📤 Subiendo a GoFile..."
-            $serverResp = Invoke-RestMethod -Uri "https://api.gofile.io/servers" -TimeoutSec 10
-            $server = $serverResp.data.servers[0].name
-            if ($server) {
-              $rawJson = curl.exe -s -F "file=@aegis.exe" "https://$server.gofile.io/contents/uploadfile"
-              $uploadResp = $rawJson | ConvertFrom-Json
-              if ($uploadResp.data.downloadPage) {
-                $gofileUrl = $uploadResp.data.downloadPage
-                Write-Host "   ✅ GoFile: $gofileUrl"
-              }
-            }
-          } catch {
-            Write-Warning "GoFile error: $_"
+          $iscc = if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") { "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" } else { "iscc.exe" }
+          $ver = "${{ steps.semver.outputs.version }}"
+          Write-Host "Compilando instalador Inno Setup con versión $ver..."
+          & $iscc /O+ /DMyAppVersion=$ver installer.iss
+
+      - name: 📊 Reportar tamaño de artefactos
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path bin/aegis.exe, dist/*.exe, SIDC_2014.bak | ForEach-Object {
+            "{0} -> {1:N1} MB" -f $_.Name, ($_.Length / 1MB)
           }
 
-          if (-not $gofileUrl) {
-            $gofileUrl = "https://gofile.io/d/GkN4Yf"
-            Write-Host "   ℹ️ Usando enlace GoFile: $gofileUrl"
-          }
-
-          $catboxUrl = ""
-          try {
-            Write-Host "📤 Subiendo a Catbox..."
-            $catResp = curl.exe -s -F "reqtype=fileupload" -F "fileToUpload=@aegis.exe" https://catbox.moe/user/api.php
-            if ($catResp -match "^https?://") {
-              $catboxUrl = $catResp.Trim()
-              Write-Host "   ✅ Catbox: $catboxUrl"
-            }
-          } catch {
-            Write-Warning "Catbox error: $_"
-          }
-
-          $lines = @(
-            "### ⚡ Descarga rápida",
-            "",
-            "| Mirror | Link |",
-            "|--------|------|",
-            "| 📁 GoFile | [$gofileUrl]($gofileUrl) |"
-          )
-          if ($catboxUrl) {
-            $lines += "| 🐱 Catbox | [$catboxUrl]($catboxUrl) |"
-          }
-
-          $lines -join "`n" | Out-File -FilePath release-body.md -Encoding utf8
-
-      - name: 🏷️ Crear/actualizar Git tag
-        if: startsWith(github.ref, 'refs/heads/')
-        uses: actions/github-script@v7
+      - name: 📤 Subir Artefactos al Run
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const tag = '${{ env.TAG }}';
-            const sha = context.sha;
-            try {
-              await github.rest.git.createRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: `refs/tags/${tag}`,
-                sha: sha
-              });
-              console.log(`✅ Tag ${tag} created @ ${sha}`);
-            } catch (e) {
-              if (e.status === 422) {
-                console.log(`⚠️ Tag ${tag} already exists, reusing it`);
-              } else {
-                throw e;
-              }
-            }
+          name: AegisSetup-v${{ steps.semver.outputs.version }}-Windows
+          path: |
+            dist/*.exe
+            bin/aegis.exe
+            SIDC_2014.bak
+          retention-days: 30
 
-      - name: 🚀 Publicar Release
+      - name: 🚀 Publicar GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.semver.outputs.version_tag }}
+          name: Release ${{ steps.semver.outputs.version_tag }}
+          body: |
+            ## 📦 Artefactos Oficiales de Aegis Setup (SIDC)
+
+            | Archivo | Tipo | Descripción |
+            | :--- | :--- | :--- |
+            | **`AegisSetup-Setup-v${{ steps.semver.outputs.version }}.exe`** | **Instalador Oficial (Inno Setup)** | **Recomendado para Terminales y Servidores.** Asistente guiado de instalación, accesos directos en Menú de Inicio y Escritorio, registro COM/OCX y desinstalador limpio. |
+            | **`aegis.exe`** | **Binario Portable (CLI / TUI)** | Ejecutable puro sin instalación. Ideal para tareas automatizadas, CI/CD o ejecución directa desde terminal. |
+            | **`SIDC_2014.bak`** | **Respaldo de Base de Datos** | Respaldo oficial de SQL Server para restauración automática vía `aegis setup-db`. |
+
+            ---
+            *Desarrollado para FEMUCARIBE · Costa Rica.*
           files: |
-            aegis.exe
+            dist/*.exe
+            bin/aegis.exe
             SIDC_2014.bak
-          tag_name: ${{ env.TAG }}
-          name: ${{ env.TAG }}
-          body_path: release-body.md
-          generate_release_notes: true
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

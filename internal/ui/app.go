@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"aegis-setup/internal/auth"
 	"aegis-setup/internal/check"
 	"aegis-setup/internal/config"
 	"aegis-setup/internal/precheck"
 	"aegis-setup/internal/setup"
+	"aegis-setup/internal/version"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -39,6 +41,7 @@ const (
 	// sacarlo, y el default del desarrollador (C:\DEV\SIDC) hacía que el instalador
 	// midiera la máquina donde se programó Aegis en vez de la que está instalando.
 	screenAppDir
+	screenLogin
 )
 
 type taskKind int
@@ -114,6 +117,8 @@ type Model struct {
 	// presetAppDir es el flag --app-dir: cuando viene, la carpeta ya está dicha y no hay
 	// nada que preguntar (camino no interactivo).
 	presetAppDir string
+	authMgr      *auth.Manager
+	login        loginModel
 }
 
 var menuItems = []menuEntry{
@@ -162,6 +167,13 @@ func (m Model) SetPresetAppDir(dir string) Model {
 	return m
 }
 
+// SetAuthManager asocia el coordinador de autenticación Supabase al TUI.
+func (m Model) SetAuthManager(mgr *auth.Manager) Model {
+	m.authMgr = mgr
+	m.login = newLoginModel(mgr, m.styles)
+	return m
+}
+
 // SetPrimeraVez marca que no hay config todavía, así que lo primero es preguntar en
 // qué PC estamos. Lo decide el CLI, que es quien sabe si el archivo existe: el
 // modelo no toca el disco.
@@ -196,9 +208,22 @@ func (m Model) runChecks() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case loginSuccessMsg:
+		m.screen = screenMenu
+		return m, nil
+	case cancelLoginMsg:
+		m.screen = screenMenu
+		return m, nil
+	case logoutMsg:
+		if m.authMgr != nil {
+			_ = m.authMgr.Logout()
+		}
+		m.screen = screenMenu
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.login.setSize(msg.Width, msg.Height)
 		switch m.screen {
 		case screenDone:
 			m = m.refreshViewportContent(m.doneBody(), 4, 2)
@@ -237,6 +262,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		switch m.screen {
+		case screenLogin:
+			var cmd tea.Cmd
+			m.login, cmd = m.login.update(msg)
+			return m, cmd
 		case screenPerfil:
 			return m.updatePerfil(msg)
 		case screenServer:
@@ -270,6 +299,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "e", "E":
 				return m.pedirPermisos()
+			case "l", "L":
+				if m.authMgr != nil && m.authMgr.IsAuthenticated(context.Background()) {
+					_ = m.authMgr.Logout()
+					return m, nil
+				}
+				m.screen = screenLogin
+				m.login = newLoginModel(m.authMgr, m.styles)
+				m.login.setSize(m.width, m.height)
+				return m, nil
 			default:
 				for _, it := range menuItems {
 					if msg.String() == it.key {
@@ -867,10 +905,19 @@ func (m Model) View() tea.View {
 func (m Model) viewMenu() string {
 	s := m.styles
 	var b strings.Builder
-	b.WriteString(s.AppTitle.Render("AEGIS SETUP") + "\n")
-	b.WriteString(s.Subtitle.Render(fmt.Sprintf("env=%s db_mode=%s server=%s db=%s", m.cfg.Env, m.cfg.DbMode, m.cfg.Server, m.cfg.Database)) + "\n")
+
+	var badges []string
+	badges = append(badges, s.BadgeInfo.Render("PERFIL: "+strings.ToUpper(m.cfg.Env)))
+	if m.authMgr != nil && m.authMgr.IsAuthenticated(context.Background()) {
+		user := m.authMgr.CurrentUser(context.Background())
+		badges = append(badges, s.BadgeSuccess.Render("OPERADOR: "+user))
+	} else {
+		badges = append(badges, s.BadgeMuted.Render("OPERADOR: ANÓNIMO"))
+	}
+	b.WriteString(fmt.Sprintf("%s  %s  %s\n\n", s.AppTitle.Render("AEGIS SETUP"), strings.Join(badges, "  "), s.Subtitle.Render("v"+version.Current)))
+	b.WriteString(s.Muted.Render(fmt.Sprintf("db_mode=%s · server=%s · db=%s", m.cfg.DbMode, m.cfg.Server, m.cfg.Database)) + "\n")
 	b.WriteString(m.checklistLine() + "\n\n")
-	b.WriteString(s.SectionHeader.Render("FLUJO (se ejecuta solo, sin chorrear comandos)") + "\n")
+	b.WriteString(s.SectionHeader.Render("FLUJO PRINCIPAL") + "\n")
 	for i, it := range menuItems {
 		cur := "  "
 		if m.cursor == i {
@@ -891,6 +938,7 @@ func (m Model) viewMenu() string {
 		s.Key.Render("[↑↓/Enter]")+s.Desc.Render(" elegir   ")+
 			s.Key.Render("[C]")+s.Desc.Render(" checklist   ")+
 			s.Key.Render("[E]")+s.Desc.Render(" permisos   ")+
+			s.Key.Render("[L]")+s.Desc.Render(" operador   ")+
 			s.Key.Render("[H]")+s.Desc.Render(" ayuda   ")+
 			s.Key.Render("[Q]")+s.Desc.Render(" salir")))
 	return s.Box.Render(b.String())
@@ -962,10 +1010,10 @@ func (m Model) viewChecklist() string {
 	}
 
 	footer := s.HelpBar.Render(
-		s.Key.Render("[↑↓/PgUp/PgDn]")+s.Desc.Render(" desplazar   ")+
-			s.Key.Render("[Esc/Enter]")+s.Desc.Render(" volver al menú   ")+
-			s.Key.Render("[C]")+s.Desc.Render(" recalcular   ")+
-			s.Key.Render("[E]")+s.Desc.Render(" permisos"))
+		s.Key.Render("[↑↓/PgUp/PgDn]") + s.Desc.Render(" desplazar   ") +
+			s.Key.Render("[Esc/Enter]") + s.Desc.Render(" volver al menú   ") +
+			s.Key.Render("[C]") + s.Desc.Render(" recalcular   ") +
+			s.Key.Render("[E]") + s.Desc.Render(" permisos"))
 
 	if m.height <= 0 {
 		return s.Box.Render(header.String() + m.checklistBody() + "\n" + footer)

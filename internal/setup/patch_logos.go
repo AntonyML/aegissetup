@@ -162,10 +162,10 @@ func GenerateReportBMP(src image.Image) ([]byte, error) {
 	binary.LittleEndian.PutUint32(buf[14:18], 40)
 	binary.LittleEndian.PutUint32(buf[18:22], uint32(reportBMPW))
 	binary.LittleEndian.PutUint32(buf[22:26], uint32(reportBMPH))
-	binary.LittleEndian.PutUint16(buf[26:28], 1)               // Planes
-	binary.LittleEndian.PutUint16(buf[28:30], 32)              // 32 bpp
-	binary.LittleEndian.PutUint32(buf[38:42], 3779)            // XpixelsPerM (96 DPI)
-	binary.LittleEndian.PutUint32(buf[42:46], 3779)            // YpixelsPerM (96 DPI)
+	binary.LittleEndian.PutUint16(buf[26:28], 1)    // Planes
+	binary.LittleEndian.PutUint16(buf[28:30], 32)   // 32 bpp
+	binary.LittleEndian.PutUint32(buf[38:42], 3779) // XpixelsPerM (96 DPI)
+	binary.LittleEndian.PutUint32(buf[42:46], 3779) // YpixelsPerM (96 DPI)
 
 	// Pixel data: BMP bottom-to-top, formato B, G, R, A
 	idx := 54
@@ -176,7 +176,7 @@ func GenerateReportBMP(src image.Image) ([]byte, error) {
 			buf[idx] = dst.Pix[pIdx+2]   // B
 			buf[idx+1] = dst.Pix[pIdx+1] // G
 			buf[idx+2] = dst.Pix[pIdx]   // R
-			buf[idx+3] = 0x00           // A
+			buf[idx+3] = 0x00            // A
 			idx += 4
 		}
 	}

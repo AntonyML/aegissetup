@@ -54,7 +54,7 @@ docker exec -i sidc_sql2019 /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 
 # Y en el DSN usa Server: CONTABILIDAD,14333
 # Asi el .exe y los .rpt creen que hablan con prod.
 
-# 8) Access: copia DB_SISTEMA.mdb (pwd fdrfrd) a C:\DEV\SIDC\DB_SISTEMA.mdb
+# 8) Access: DESMITIFICADO. SIDC no usa DB_SISTEMA.mdb (es 100% SQL Server, todas las tablas estan en SIDC). No copiar nada.
 
 # 9) Baja / limpia:
 # docker compose down      (mantiene datos)

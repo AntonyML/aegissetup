@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 
+	"aegis-setup/internal/auth"
 	"aegis-setup/internal/config"
 	"aegis-setup/internal/ui"
 
@@ -37,7 +38,9 @@ func primeraVez(path string) bool { return !existeArchivo(path) }
 // aparte de runTUI para poder medir el camino completo bandera -> modelo -> config.json
 // sin abrir una terminal.
 func modeloInicial(cfg config.Config, path string, o opcionesTUI) ui.Model {
+	mgr := auth.NewManager(auth.DefaultSupabaseURL, auth.DefaultPublishableKey, "", nil)
 	return ui.NewModel(cfg, path).
+		SetAuthManager(mgr).
 		SetPresetServer(o.server).
 		SetPresetAppDir(o.appDir).
 		SetPrimeraVez(primeraVez(path))

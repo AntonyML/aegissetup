@@ -307,4 +307,3 @@ func newPatchLogosCmd(res func() (config.Config, string, error)) *cobra.Command 
 		},
 	}
 }
-
