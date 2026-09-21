@@ -343,15 +343,37 @@ func PatchAppAndReports(appDir string, out func(string)) error {
 		return fmt.Errorf("decodificando %s: %w", logoPath, err)
 	}
 
-	// 1. Parchear ejecutable principal si existe
-	exe := filepath.Join(appDir, "Sistema Intergrado de Controles y Presupuesto.exe")
-	if data, err := os.ReadFile(exe); err == nil {
-		if patched, rep, err := PatchLogos(data, img); err == nil && rep.Total() > 0 {
-			if err := os.WriteFile(exe, patched, 0644); err == nil {
+	// 1. Parchear ejecutables presentes (producción y/o docker)
+	targets := []string{
+		"Sistema Intergrado de Controles y Presupuesto.exe",
+		"Sistema Intergrado de Controles y Presupuesto_DOCKER.exe",
+		"Sistema Integrado de Controles y Presupuesto.exe",
+		"Sistema Integrado de Controles y Presupuesto_DOCKER.exe",
+	}
+	patchedCount := 0
+	for _, targetName := range targets {
+		exe := filepath.Join(appDir, targetName)
+		data, err := os.ReadFile(exe)
+		if err != nil {
+			continue // No existe este ejecutable, omitir
+		}
+		patched, rep, err := PatchLogos(data, img)
+		if err != nil {
+			out(fmt.Sprintf("Error procesando %s: %v", targetName, err))
+			continue
+		}
+		if rep.Total() > 0 {
+			if err := os.WriteFile(exe, patched, 0644); err != nil {
+				out(fmt.Sprintf("ERROR al guardar %s (¿está en ejecución? cerrá la app antes de refrescar): %v", targetName, err))
+			} else {
+				patchedCount++
 				out(fmt.Sprintf("Logos SIDC actualizados en %s (%d imágenes, %d etiquetas)",
-					filepath.Base(exe), rep.FormLogos+rep.Backgrounds+rep.Splashes, rep.Labels))
+					targetName, rep.FormLogos+rep.Backgrounds+rep.Splashes, rep.Labels))
 			}
 		}
+	}
+	if patchedCount == 0 {
+		out("Aviso: No se encontraron ejecutables para actualizar logos en " + appDir)
 	}
 
 	// 2. Parchear plantillas de Crystal Reports en Reportes/

@@ -289,3 +289,22 @@ func newMenuCmd(res func() (config.Config, string, error), opciones func() opcio
 		},
 	}
 }
+
+func newPatchLogosCmd(res func() (config.Config, string, error)) *cobra.Command {
+	return &cobra.Command{
+		Use:   "patch-logos",
+		Short: "Actualiza logos en ejecutables (.exe, _DOCKER.exe) y reportes (.rpt) desde Fotos/Principal.jpg",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, err := res()
+			if err != nil {
+				return err
+			}
+			if cfg.AppDir == "" {
+				return fmt.Errorf("app_dir sin configurar (elegí perfil o pasá --app-dir)")
+			}
+			out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
+			return setup.PatchAppAndReports(cfg.AppDir, out)
+		},
+	}
+}
+

@@ -788,12 +788,15 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 			return err
 		}
 		if !cfg.UseWinAuth {
-			appPass := secret(envAppPassword)
-			if appPass == "" {
-				appPass = os.Getenv(envAppPassword)
-			}
-			if appPass != "" {
-				_ = parcheDocker(cfg.AppDir, cfg.SQLUser, appPass, emit)
+			dockerExe := filepath.Join(cfg.AppDir, "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe")
+			if _, err := os.Stat(dockerExe); err != nil {
+				appPass := secret(envAppPassword)
+				if appPass == "" {
+					appPass = os.Getenv(envAppPassword)
+				}
+				if appPass != "" {
+					_ = parcheDocker(cfg.AppDir, cfg.SQLUser, appPass, emit)
+				}
 			}
 		}
 		return nil

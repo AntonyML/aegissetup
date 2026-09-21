@@ -168,6 +168,9 @@ Subcomandos:
 	cmd.AddCommand(newMenuCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}, func() opcionesTUI { return opcionesTUI{server: presetServer, appDir: appDir} }))
+	cmd.AddCommand(newPatchLogosCmd(func() (config.Config, string, error) {
+		return resolveCfg(exeDir, configPath, cfgLoader)
+	}))
 	cmd.AddCommand(newConfigureCmd(exeDir))
 
 	return cmd
