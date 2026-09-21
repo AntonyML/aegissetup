@@ -34,13 +34,21 @@ func runMenu(cmd *cobra.Command, cfg config.Config, path string, err error, o op
 // porque el que sabe de archivos es este lado.
 func primeraVez(path string) bool { return !existeArchivo(path) }
 
+var authManagerFactory = func() *auth.Manager {
+	return auth.NewManager(auth.DefaultSupabaseURL, auth.DefaultPublishableKey, "", nil)
+}
+
 // modeloInicial arma el modelo del TUI con lo que el CLI ya resolvió. Es una función
 // aparte de runTUI para poder medir el camino completo bandera -> modelo -> config.json
 // sin abrir una terminal.
 func modeloInicial(cfg config.Config, path string, o opcionesTUI) ui.Model {
-	mgr := auth.NewManager(auth.DefaultSupabaseURL, auth.DefaultPublishableKey, "", nil)
-	return ui.NewModel(cfg, path).
-		SetAuthManager(mgr).
+	m := ui.NewModel(cfg, path)
+	if authManagerFactory != nil {
+		if mgr := authManagerFactory(); mgr != nil {
+			m = m.SetAuthManager(mgr)
+		}
+	}
+	return m.
 		SetPresetServer(o.server).
 		SetPresetAppDir(o.appDir).
 		SetPrimeraVez(primeraVez(path))

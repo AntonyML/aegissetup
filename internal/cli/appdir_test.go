@@ -12,6 +12,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+func init() {
+	authManagerFactory = nil
+}
+
 // teclaTUI arma la pulsación como la manda Bubble Tea.
 func teclaTUI(s string) tea.KeyPressMsg {
 	r := []rune(s)

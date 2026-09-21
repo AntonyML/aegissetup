@@ -121,9 +121,11 @@ type Model struct {
 	perfilPendiente action
 	// presetAppDir es el flag --app-dir: cuando viene, la carpeta ya está dicha y no hay
 	// nada que preguntar (camino no interactivo).
-	presetAppDir string
-	authMgr      *auth.Manager
-	login        loginModel
+	presetAppDir  string
+	authMgr       *auth.Manager
+	login         loginModel
+	authenticated bool
+	operatorUser  string
 }
 
 var menuItems = []menuEntry{
@@ -172,10 +174,22 @@ func (m Model) SetPresetAppDir(dir string) Model {
 	return m
 }
 
-// SetAuthManager asocia el coordinador de autenticación Supabase al TUI.
+// SetAuthManager asocia el coordinador de autenticación Supabase al TUI y valida si existe sesión activa.
 func (m Model) SetAuthManager(mgr *auth.Manager) Model {
 	m.authMgr = mgr
 	m.login = newLoginModel(mgr, m.styles)
+	if mgr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if mgr.IsAuthenticated(ctx) {
+			m.authenticated = true
+			m.operatorUser = mgr.CurrentUser(ctx)
+		} else {
+			m.authenticated = false
+			m.operatorUser = ""
+			m.screen = screenLogin
+		}
+	}
 	return m
 }
 
@@ -184,7 +198,7 @@ func (m Model) SetAuthManager(mgr *auth.Manager) Model {
 // modelo no toca el disco.
 func (m Model) SetPrimeraVez(v bool) Model {
 	m.primeraVez = v
-	if v {
+	if v && (m.authMgr == nil || m.authenticated) {
 		m.screen = screenPerfil
 		m.cursor = 0
 	}
@@ -194,9 +208,8 @@ func (m Model) SetPrimeraVez(v bool) Model {
 type checksMsg struct{ rs []precheck.Requisito }
 
 func (m Model) Init() tea.Cmd {
-	// Sin perfil elegido no hay nada que medir: el checklist del ambiente por
-	// defecto diría "Docker en marcha" en la PC de FEMUCARIBE, que no usa Docker.
-	if m.primeraVez {
+	// Sin perfil elegido o si falta autenticar no hay nada que medir:
+	if m.primeraVez || m.screen == screenLogin {
 		return nil
 	}
 	return m.runChecks()
@@ -214,16 +227,37 @@ func (m Model) runChecks() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case loginSuccessMsg:
+		m.authenticated = true
+		if msg.Session != nil {
+			m.operatorUser = msg.Session.User.Email
+		}
+		if m.primeraVez {
+			m.screen = screenPerfil
+			m.cursor = 0
+			return m, nil
+		}
 		m.screen = screenMenu
-		return m, nil
+		m.verificando = true
+		return m, m.runChecks()
+	case loginFailedMsg:
+		var cmd tea.Cmd
+		m.login, cmd = m.login.update(msg)
+		return m, cmd
 	case cancelLoginMsg:
+		if !m.authenticated {
+			return m, tea.Quit
+		}
 		m.screen = screenMenu
 		return m, nil
 	case logoutMsg:
 		if m.authMgr != nil {
 			_ = m.authMgr.Logout()
 		}
-		m.screen = screenMenu
+		m.authenticated = false
+		m.operatorUser = ""
+		m.screen = screenLogin
+		m.login = newLoginModel(m.authMgr, m.styles)
+		m.login.setSize(m.width, m.height)
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -307,9 +341,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "e", "E":
 				return m.pedirPermisos()
 			case "l", "L":
-				if m.authMgr != nil && m.authMgr.IsAuthenticated(context.Background()) {
+				if m.authMgr != nil && m.authenticated {
 					_ = m.authMgr.Logout()
-					return m, nil
+					m.authenticated = false
+					m.operatorUser = ""
 				}
 				m.screen = screenLogin
 				m.login = newLoginModel(m.authMgr, m.styles)
@@ -957,6 +992,8 @@ func presetConfig(cfg config.Config, a action, presetServer, appDir string) (con
 func (m Model) View() tea.View {
 	var content string
 	switch m.screen {
+	case screenLogin:
+		content = m.login.view()
 	case screenWorking:
 		content = m.viewWorking()
 	case screenDone:
@@ -989,9 +1026,8 @@ func (m Model) viewMenu() string {
 
 	var badges []string
 	badges = append(badges, s.BadgeInfo.Render("PERFIL: "+strings.ToUpper(m.cfg.Env)))
-	if m.authMgr != nil && m.authMgr.IsAuthenticated(context.Background()) {
-		user := m.authMgr.CurrentUser(context.Background())
-		badges = append(badges, s.BadgeSuccess.Render("OPERADOR: "+user))
+	if m.authenticated && m.operatorUser != "" {
+		badges = append(badges, s.BadgeSuccess.Render("OPERADOR: "+m.operatorUser))
 	} else {
 		badges = append(badges, s.BadgeMuted.Render("OPERADOR: ANÓNIMO"))
 	}
@@ -1015,11 +1051,15 @@ func (m Model) viewMenu() string {
 		}
 		b.WriteString(linea + "\n")
 	}
+	labelL := " operador   "
+	if m.authenticated {
+		labelL = " cerrar sesión   "
+	}
 	b.WriteString("\n" + s.HelpBar.Render(
 		s.Key.Render("[↑↓/Enter]")+s.Desc.Render(" elegir   ")+
 			s.Key.Render("[C]")+s.Desc.Render(" checklist   ")+
 			s.Key.Render("[E]")+s.Desc.Render(" permisos   ")+
-			s.Key.Render("[L]")+s.Desc.Render(" operador   ")+
+			s.Key.Render("[L]")+s.Desc.Render(labelL)+
 			s.Key.Render("[H]")+s.Desc.Render(" ayuda   ")+
 			s.Key.Render("[Q]")+s.Desc.Render(" salir")))
 	return s.Box.Render(b.String())

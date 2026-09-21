@@ -79,14 +79,14 @@ func (m loginModel) update(msg tea.Msg) (loginModel, tea.Cmd) {
 		switch msg.String() {
 		case "tab", "down":
 			m.focused = (m.focused + 1) % 3
-			return m, m.updateFocus()
+			return m.updateFocus()
 		case "shift+tab", "up":
 			m.focused = (m.focused - 1 + 3) % 3
-			return m, m.updateFocus()
+			return m.updateFocus()
 		case "enter":
 			if m.focused == 0 {
 				m.focused = 1
-				return m, m.updateFocus()
+				return m.updateFocus()
 			}
 			return m.submit()
 		case "esc":
@@ -105,7 +105,7 @@ func (m loginModel) update(msg tea.Msg) (loginModel, tea.Cmd) {
 
 type cancelLoginMsg struct{}
 
-func (m *loginModel) updateFocus() tea.Cmd {
+func (m loginModel) updateFocus() (loginModel, tea.Cmd) {
 	cmds := make([]tea.Cmd, 2)
 	for i := 0; i < 2; i++ {
 		if i == m.focused {
@@ -114,7 +114,7 @@ func (m *loginModel) updateFocus() tea.Cmd {
 			m.inputs[i].Blur()
 		}
 	}
-	return tea.Batch(cmds...)
+	return m, tea.Batch(cmds...)
 }
 
 func (m loginModel) submit() (loginModel, tea.Cmd) {
@@ -124,12 +124,12 @@ func (m loginModel) submit() (loginModel, tea.Cmd) {
 	if email == "" {
 		m.err = fmt.Errorf("ingresá tu correo institucional")
 		m.focused = 0
-		return m, m.updateFocus()
+		return m.updateFocus()
 	}
 	if password == "" {
 		m.err = fmt.Errorf("ingresá tu contraseña")
 		m.focused = 1
-		return m, m.updateFocus()
+		return m.updateFocus()
 	}
 
 	m.loading = true
@@ -180,7 +180,7 @@ func (m loginModel) view() string {
 		Foreground(ColorWhite)
 
 	b.WriteString(titleStyle.Render("AEGIS SETUP") + "\n\n")
-	b.WriteString(s.Subtitle.Render("Autenticación de Operador Institucional (Supabase)") + "\n\n")
+	b.WriteString(s.Subtitle.Render("Autenticación Obligatoria · Operador Institucional (Supabase)") + "\n\n")
 
 	b.WriteString(labelStyle.Render("Correo institucional:") + "\n")
 	b.WriteString(m.inputs[0].View() + "\n\n")
@@ -203,7 +203,7 @@ func (m loginModel) view() string {
 		b.WriteString(s.Muted.Render("Ingresá las credenciales autorizadas por FEMUCARIBE.") + "\n")
 	}
 
-	b.WriteString("\n" + s.HelpBar.Render("[Tab/↑/↓] Moverse  ·  [Enter] Confirmar  ·  [Esc] Cancelar"))
+	b.WriteString("\n" + s.HelpBar.Render("[Tab/↑/↓] Moverse  ·  [Enter] Confirmar  ·  [Esc] Salir"))
 
 	card := cardStyle.Render(b.String())
 
