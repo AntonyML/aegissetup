@@ -16,6 +16,12 @@ import (
 	"golang.org/x/term"
 )
 
+func init() {
+	// Desactiva la trampa de Cobra en Windows para que accesos directos de escritorio
+	// o doble click desde el Explorador de Windows ejecuten el menú TUI directamente.
+	cobra.MousetrapHelpText = ""
+}
+
 const (
 	ExitOK         = 0
 	ExitGeneralErr = 1
