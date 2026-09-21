@@ -329,7 +329,9 @@ func PrincipalLogoPath(appDir string) string {
 func PatchAppAndReports(appDir string, out func(string)) error {
 	logoPath := PrincipalLogoPath(appDir)
 	if logoPath == "" {
-		return nil
+		expected := filepath.Join(appDir, "Fotos", "Principal.jpg")
+		out(fmt.Sprintf("Aviso: No se encontró la imagen de origen %s", expected))
+		return fmt.Errorf("no se encontró %s", expected)
 	}
 
 	logoFile, err := os.Open(logoPath)
@@ -344,42 +346,53 @@ func PatchAppAndReports(appDir string, out func(string)) error {
 	}
 
 	// 1. Parchear ejecutables presentes (producción y/o docker)
-	targets := []string{
-		"Sistema Intergrado de Controles y Presupuesto.exe",
-		"Sistema Intergrado de Controles y Presupuesto_DOCKER.exe",
-		"Sistema Integrado de Controles y Presupuesto.exe",
-		"Sistema Integrado de Controles y Presupuesto_DOCKER.exe",
+	type exeTarget struct {
+		filename string
+		optional bool
 	}
+	targets := []exeTarget{
+		{filename: "Sistema Intergrado de Controles y Presupuesto.exe", optional: false},
+		{filename: "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe", optional: true},
+	}
+
 	patchedCount := 0
-	for _, targetName := range targets {
-		exe := filepath.Join(appDir, targetName)
+	for _, t := range targets {
+		exe := filepath.Join(appDir, t.filename)
 		data, err := os.ReadFile(exe)
 		if err != nil {
-			continue // No existe este ejecutable, omitir
+			if !t.optional {
+				out(fmt.Sprintf("Aviso: %s no existe en %s", t.filename, appDir))
+			}
+			continue
 		}
 		patched, rep, err := PatchLogos(data, img)
 		if err != nil {
-			out(fmt.Sprintf("Error procesando %s: %v", targetName, err))
+			out(fmt.Sprintf("Error procesando %s: %v", t.filename, err))
 			continue
 		}
 		if rep.Total() > 0 {
 			if err := os.WriteFile(exe, patched, 0644); err != nil {
-				out(fmt.Sprintf("ERROR al guardar %s (¿está en ejecución? cerrá la app antes de refrescar): %v", targetName, err))
+				out(fmt.Sprintf("ERROR al guardar %s (¿está en ejecución? cerrá la app antes de refrescar): %v", t.filename, err))
 			} else {
 				patchedCount++
 				out(fmt.Sprintf("Logos SIDC actualizados en %s (%d imágenes, %d etiquetas)",
-					targetName, rep.FormLogos+rep.Backgrounds+rep.Splashes, rep.Labels))
+					t.filename, rep.FormLogos+rep.Backgrounds+rep.Splashes, rep.Labels))
 			}
+		} else {
+			out(fmt.Sprintf("Sin modificaciones en %s (no se detectaron imágenes compatibles)", t.filename))
 		}
 	}
+
 	if patchedCount == 0 {
-		out("Aviso: No se encontraron ejecutables para actualizar logos en " + appDir)
+		out("Aviso: No se actualizó ningún ejecutable en " + appDir)
 	}
 
 	// 2. Parchear plantillas de Crystal Reports en Reportes/
 	repDir := filepath.Join(appDir, "Reportes")
 	if _, err := os.Stat(repDir); err == nil {
 		_, _ = PatchReportsLogos(repDir, img, out)
+	} else {
+		out(fmt.Sprintf("Aviso: Carpeta de reportes no encontrada (%s)", repDir))
 	}
 
 	return nil

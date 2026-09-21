@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -183,3 +184,49 @@ func TestGenerateReportBMPSintetico(t *testing.T) {
 		t.Errorf("tamaño final = %d, quiero %d", info.Size(), buf.Len())
 	}
 }
+
+func TestPatchAppAndReportsMissingFiles(t *testing.T) {
+	// 1. Directorio vacío sin Fotos/Principal.jpg debe informar y devolver error descriptivo
+	emptyDir := t.TempDir()
+	var logs []string
+	emit := func(s string) { logs = append(logs, s) }
+
+	err := PatchAppAndReports(emptyDir, emit)
+	if err == nil {
+		t.Fatalf("se esperaba error por falta de Fotos/Principal.jpg, obtuve nil")
+	}
+	if len(logs) == 0 {
+		t.Errorf("se esperaba mensaje de log avisando la falta del archivo")
+	}
+
+	// 2. Con Fotos/Principal.jpg pero sin binarios ni reportes no debe caerse ni entrar en pánico
+	fotosDir := filepath.Join(emptyDir, "Fotos")
+	if err := os.MkdirAll(fotosDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dummyImg, err := GeneratePaddedJPEG(creaImagenPrueba(50, 50), 50, 50, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fotosDir, "Principal.jpg"), dummyImg, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	logs = nil
+	err = PatchAppAndReports(emptyDir, emit)
+	if err != nil {
+		t.Fatalf("no debió fallar por no tener binarios opcionales: %v", err)
+	}
+	// Debe haber avisado que no se encontró el ejecutable principal y los reportes
+	encontradoAviso := false
+	for _, l := range logs {
+		if strings.Contains(l, "Aviso:") {
+			encontradoAviso = true
+			break
+		}
+	}
+	if !encontradoAviso {
+		t.Errorf("se esperaba al menos un aviso informativo, logs: %v", logs)
+	}
+}
+
