@@ -129,9 +129,9 @@ func HostPuerto(server string) string {
 	return s + ":" + PuertoPorDefecto
 }
 
-// tienePuerto distingue "localhost:1433" de "localhost". Un ':' seguido de algo que
+// TienePuerto distingue "localhost:1433" de "localhost". Un ':' seguido de algo que
 // no sea puerto no cuenta.
-func tienePuerto(s string) bool {
+func TienePuerto(s string) bool {
 	i := strings.LastIndex(s, ":")
 	if i < 0 || i == len(s)-1 {
 		return false
@@ -144,10 +144,22 @@ func tienePuerto(s string) bool {
 	return true
 }
 
+func tienePuerto(s string) bool {
+	return TienePuerto(s)
+}
+
+// URLHost normaliza el host para la URL de go-mssqldb. Las instancias con nombre
+// usan barra normal (ej. sqlserver://host/instance) porque la barra invertida es
+// inválida en URLs y hace fallar url.Parse.
+func URLHost(server string) string {
+	srv := HostPuerto(server)
+	return strings.ReplaceAll(srv, `\`, `/`)
+}
+
 // adminDSN arma conexión SA/master contra el Server configurado.
 // ODBC usa "host,puerto" pero go-mssqldb exige "host:puerto".
 func adminDSN(cfg config.Config, saPass string) string {
-	srv := HostPuerto(cfg.Server)
+	srv := URLHost(cfg.Server)
 	return fmt.Sprintf("sqlserver://sa:%s@%s?database=master&dial+timeout=15&encrypt=disable", urlEscape(saPass), srv)
 }
 
@@ -161,7 +173,7 @@ func urlEscape(s string) string {
 // a propósito: si cada uno armara la suya, un cambio en uno solo haría que el
 // checklist y la verificación dijeran cosas distintas de la misma base.
 func AppDSN(cfg config.Config, appPass string) string {
-	srv := HostPuerto(cfg.Server)
+	srv := URLHost(cfg.Server)
 	if cfg.UseWinAuth || appPass == "" {
 		return fmt.Sprintf("sqlserver://%s?database=%s&dial+timeout=10&encrypt=disable&trusted+connection=yes", srv, cfg.Database)
 	}

@@ -27,19 +27,20 @@ type Result struct {
 func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 	var out []Result
 
-	host := cfg.Server
-	if i := strings.LastIndex(host, ","); i > 0 {
-		host = host[:i] + ":" + host[i+1:]
-	}
-	dialCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	var d net.Dialer
-	conn, err := d.DialContext(dialCtx, "tcp", host)
-	if err != nil {
-		out = append(out, Result{"TCP " + cfg.Server, false, err.Error()})
+	if strings.Contains(cfg.Server, "\\") && !setup.TienePuerto(cfg.Server) {
+		out = append(out, Result{"TCP " + cfg.Server, true, "instancia con nombre (puerto dinámico vía SQL Browser)"})
 	} else {
-		conn.Close()
-		out = append(out, Result{"TCP " + cfg.Server, true, "puerto abierto"})
+		host := setup.HostPuerto(cfg.Server)
+		dialCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+		var d net.Dialer
+		conn, err := d.DialContext(dialCtx, "tcp", host)
+		if err != nil {
+			out = append(out, Result{"TCP " + cfg.Server, false, err.Error()})
+		} else {
+			conn.Close()
+			out = append(out, Result{"TCP " + cfg.Server, true, "puerto abierto"})
+		}
 	}
 
 	dsn := setup.AppDSN(cfg, appPass)

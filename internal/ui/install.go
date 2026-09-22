@@ -99,8 +99,8 @@ func validateAppPassword(cfg config.Config, pass string) error {
 	if pass == "" {
 		return errors.New("la clave del login de app no puede quedar vacía")
 	}
-	if cfg.UseWinAuth {
-		return nil // prod no parchea _DOCKER, no hay tope que aplicar
+	if cfg.UseWinAuth || cfg.DbMode != config.DbDocker {
+		return nil // solo docker parchea _DOCKER, no hay tope que aplicar en prod/server
 	}
 	max := setup.DockerPatchBudget(cfg.SQLUser)
 	if max <= 0 {
@@ -124,8 +124,11 @@ func secretHint(cfg config.Config, name string) string {
 		if cfg.UseWinAuth {
 			return "Prod usa Windows Auth: la clave no se guarda en ningun lado."
 		}
-		return fmt.Sprintf("Es la del login de app %q. Máximo %d chars: se embebe en el exe como UID=%s;PWD=...",
-			cfg.SQLUser, setup.DockerPatchBudget(cfg.SQLUser), cfg.SQLUser)
+		if cfg.DbMode == config.DbDocker {
+			return fmt.Sprintf("Es la del login de app %q. Máximo %d chars: se embebe en el exe como UID=%s;PWD=...",
+				cfg.SQLUser, setup.DockerPatchBudget(cfg.SQLUser), cfg.SQLUser)
+		}
+		return fmt.Sprintf("Es la clave del usuario SQL %q para conectar a la base de datos.", cfg.SQLUser)
 	}
 	return ""
 }

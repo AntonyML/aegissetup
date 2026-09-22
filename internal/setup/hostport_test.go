@@ -1,7 +1,12 @@
 // © Antony Monge López — Costa Rica — Céd. 604700548
 package setup
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"aegis-setup/internal/config"
+)
 
 // Esta función nació de un bug real: el checklist reportaba "dial tcp: address
 // localhost: missing port in address" en el perfil prod local, con la máquina
@@ -36,3 +41,33 @@ func TestHostPuertoSiempreDialable(t *testing.T) {
 		}
 	}
 }
+
+func TestURLHost(t *testing.T) {
+	casos := []struct{ in, want string }{
+		{`192.168.2.145\SQLEXPRESS`, `192.168.2.145/SQLEXPRESS`},
+		{`localhost\SQLEXPRESS`, `localhost/SQLEXPRESS`},
+		{`192.168.2.145,54721`, `192.168.2.145:54721`},
+		{"localhost", "localhost:1433"},
+	}
+	for _, c := range casos {
+		if got := URLHost(c.in); got != c.want {
+			t.Errorf("URLHost(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestAppDSNNamedInstance(t *testing.T) {
+	cfg := config.Default()
+	cfg.Server = `192.168.2.145\SQLEXPRESS`
+	cfg.Database = "SIDC"
+	cfg.UseWinAuth = true
+
+	dsn := AppDSN(cfg, "")
+	if strings.Contains(dsn, `\`) {
+		t.Errorf("AppDSN no debe contener barras invertidas que rompan url.Parse: %q", dsn)
+	}
+	if !strings.Contains(dsn, "192.168.2.145/SQLEXPRESS") {
+		t.Errorf("AppDSN debe contener 192.168.2.145/SQLEXPRESS: %q", dsn)
+	}
+}
+

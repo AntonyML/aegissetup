@@ -38,6 +38,8 @@ const (
 	screenPerfil
 	screenServer
 	screenDatabase
+	screenAuth
+	screenSQLUser
 	// screenAppDir pregunta dónde está la carpeta de SIDC. Va después del perfil porque
 	// no es una preferencia sino un dato de esta PC: en una PC limpia no hay de dónde
 	// sacarlo, y el default del desarrollador (C:\DEV\SIDC) hacía que el instalador
@@ -113,6 +115,14 @@ type Model struct {
 	srvErr   string
 	dbInput  textinput.Model
 	dbErr    string
+	// presetWinAuth y presetSQLUser guardan la elección de autenticación del perfil pendiente.
+	presetWinAuth   *bool
+	presetSQLUser   string
+	userInput       textinput.Model
+	userErr         string
+	authCursor      int
+	pendingTask     taskKind
+	pendingTaskName string
 	// dirInput y dirErr son el prompt de la carpeta de SIDC, y perfilPendiente es el
 	// perfil que se está aplicando mientras se contestan sus preguntas: el server
 	// primero, la carpeta después, y la config se guarda recién cuando no falta ninguna.
@@ -147,6 +157,18 @@ var perfiles = []menuEntry{
 	{"1", "Pruebas", "SQL Server 2019 en Docker, en esta misma PC", actPresetDev},
 	{"2", "Servidor FEMUCARIBE", "FEMUCARIBE\\AdministradorRed, Windows Auth, SIDC", actPresetProdLocal},
 	{"3", "Producción en otro servidor", "SQL Server en otra PC de la red", actPresetProdServer},
+}
+
+type authOption struct {
+	key     string
+	name    string
+	desc    string
+	winAuth bool
+}
+
+var authOptions = []authOption{
+	{"1", "Windows Authentication", "Para equipos en el dominio FEMUCARIBE. Sin claves en disco.", true},
+	{"2", "Autenticación SQL Server", "Usuario y contraseña (ej. sidc). Para terminales fuera de dominio.", false},
 }
 
 // NewModel crea el modelo TUI con la config cargada.
@@ -311,6 +333,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateServer(msg)
 		case screenDatabase:
 			return m.updateDatabase(msg)
+		case screenAuth:
+			return m.updateAuth(msg)
+		case screenSQLUser:
+			return m.updateSQLUser(msg)
 		case screenAppDir:
 			return m.updateAppDir(msg)
 		case screenMenu:
@@ -450,6 +476,8 @@ func (m Model) aplicarPreset(a action) (tea.Model, tea.Cmd) {
 	if a == actConfigManual {
 		m.presetServer = ""
 		m.presetDB = ""
+		m.presetWinAuth = nil
+		m.presetSQLUser = ""
 	}
 	return m.siguientePregunta("")
 }
@@ -469,6 +497,17 @@ func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
 		m.dbInput = newDatabaseInput(m.sugerenciaDatabase())
 		m.dbErr = ""
 		m.screen = screenDatabase
+		return m, nil
+	}
+	if a == actConfigManual && m.presetWinAuth == nil {
+		m.authCursor = 0
+		m.screen = screenAuth
+		return m, nil
+	}
+	if a == actConfigManual && m.presetWinAuth != nil && !*m.presetWinAuth && m.presetSQLUser == "" {
+		m.userInput = newServerInput(m.sugerenciaSQLUser())
+		m.userErr = ""
+		m.screen = screenSQLUser
 		return m, nil
 	}
 	if appDir == "" {
@@ -506,6 +545,16 @@ func (m Model) sugerenciaDatabase() string {
 		return m.cfg.Database
 	}
 	return "SIDC"
+}
+
+func (m Model) sugerenciaSQLUser() string {
+	if m.presetSQLUser != "" {
+		return m.presetSQLUser
+	}
+	if m.cfg.SQLUser != "" && m.cfg.SQLUser != "dev" {
+		return m.cfg.SQLUser
+	}
+	return "sidc"
 }
 
 func newDatabaseInput(sugerencia string) textinput.Model {
@@ -629,6 +678,70 @@ func (m Model) updateDatabase(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateAuth(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.presetWinAuth = nil
+		if m.perfilPendiente == actConfigManual {
+			m.screen = screenDatabase
+		} else {
+			m.screen = screenServer
+		}
+		return m, nil
+	case "up", "k":
+		if m.authCursor > 0 {
+			m.authCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.authCursor < len(authOptions)-1 {
+			m.authCursor++
+		}
+		return m, nil
+	case "1":
+		m.authCursor = 0
+		return m.seleccionarAuth(true)
+	case "2":
+		m.authCursor = 1
+		return m.seleccionarAuth(false)
+	case "enter":
+		return m.seleccionarAuth(authOptions[m.authCursor].winAuth)
+	}
+	return m, nil
+}
+
+func (m Model) seleccionarAuth(winAuth bool) (tea.Model, tea.Cmd) {
+	m.presetWinAuth = &winAuth
+	if winAuth {
+		m.presetSQLUser = ""
+	}
+	return m.siguientePregunta("")
+}
+
+func (m Model) updateSQLUser(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.userErr = ""
+		m.presetWinAuth = nil
+		m.screen = screenAuth
+		return m, nil
+	case "enter":
+		user := strings.TrimSpace(m.userInput.Value())
+		if user == "" {
+			user = m.sugerenciaSQLUser()
+		}
+		if user == "" {
+			m.userErr = "El usuario no puede quedar vacío."
+			return m, nil
+		}
+		m.presetSQLUser = user
+		return m.siguientePregunta("")
+	}
+	var cmd tea.Cmd
+	m.userInput, cmd = m.userInput.Update(msg)
+	return m, cmd
+}
+
 // updateAppDir pregunta dónde está la carpeta de SIDC. Valida antes de guardar: una ruta
 // relativa se resolvería contra el directorio de trabajo del proceso, así que la misma
 // config mediría carpetas distintas según desde dónde se lance Aegis.
@@ -638,6 +751,14 @@ func (m Model) updateAppDir(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Igual que el nombre del servidor: si venía del arranque, el perfil sigue sin
 		// elegir y caer al menú dejaría la config por defecto, que no es la de esta PC.
 		m.dirErr = ""
+		if m.perfilPendiente == actConfigManual {
+			if m.presetWinAuth != nil && !*m.presetWinAuth {
+				m.screen = screenSQLUser
+				return m, nil
+			}
+			m.screen = screenAuth
+			return m, nil
+		}
 		if m.primeraVez {
 			m.screen = screenPerfil
 			return m, nil
@@ -675,9 +796,19 @@ func (m Model) aplicarPerfil(a action, server, appDir string) (tea.Model, tea.Cm
 	}
 	if m.presetDB != "" {
 		cfg.Database = m.presetDB
-		if err := cfg.Validate(); err != nil {
-			return m.errorDePerfil(err)
+	}
+	if m.presetWinAuth != nil {
+		cfg.UseWinAuth = *m.presetWinAuth
+		if !*m.presetWinAuth {
+			if m.presetSQLUser != "" {
+				cfg.SQLUser = m.presetSQLUser
+			} else if cfg.SQLUser == "" || cfg.SQLUser == "dev" {
+				cfg.SQLUser = "sidc"
+			}
 		}
+	}
+	if err := cfg.Validate(); err != nil {
+		return m.errorDePerfil(err)
 	}
 	if err := cfg.Save(m.cfgPath); err != nil {
 		return m.errorDePerfil(err)
@@ -685,9 +816,12 @@ func (m Model) aplicarPerfil(a action, server, appDir string) (tea.Model, tea.Cm
 	m.cfg = cfg
 	m.presetServer = ""
 	m.presetDB = ""
+	m.presetWinAuth = nil
+	m.presetSQLUser = ""
 	m.primeraVez = false
 	m.srvErr = ""
 	m.dbErr = ""
+	m.userErr = ""
 	m.dirErr = ""
 	m.bloqueo = false
 	m.taskErr = nil
@@ -745,7 +879,15 @@ func (m Model) updateAsk(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.askQueue = m.askQueue[1:]
 		m.askErr = ""
 		if len(m.askQueue) == 0 {
-			return m.startTask(taskInstall, "INSTALACIÓN COMPLETA")
+			task := m.pendingTask
+			taskName := m.pendingTaskName
+			m.pendingTask = taskNone
+			m.pendingTaskName = ""
+			if task == taskNone {
+				task = taskInstall
+				taskName = "INSTALACIÓN COMPLETA"
+			}
+			return m.startTask(task, taskName)
 		}
 		m.askInput = newSecretInput()
 		return m, nil
@@ -764,8 +906,10 @@ func newSecretInput() textinput.Model {
 	return ti
 }
 
-// beginAsk pide las claves que faltan y despues corre la instalacion completa.
-func (m Model) beginAsk(need []string) (tea.Model, tea.Cmd) {
+// beginAsk pide las claves que faltan y despues corre la tarea pendiente.
+func (m Model) beginAsk(task taskKind, name string, need []string) (tea.Model, tea.Cmd) {
+	m.pendingTask = task
+	m.pendingTaskName = name
 	m.askQueue = need
 	m.askInput = newSecretInput()
 	m.askErr = ""
@@ -801,14 +945,20 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 	switch a {
 	case actInstall:
 		if need := secretNeeds(m.cfg, m.hasSecret); len(need) > 0 {
-			return m.beginAsk(need)
+			return m.beginAsk(taskInstall, stepTitle(taskInstall), need)
 		}
 		return m.startTask(taskInstall, stepTitle(taskInstall))
 	case actSetupDB:
 		return m.startTask(taskSetupDB, stepTitle(taskSetupDB))
 	case actSetupApp:
+		if need := secretNeeds(m.cfg, m.hasSecret); len(need) > 0 {
+			return m.beginAsk(taskSetupApp, stepTitle(taskSetupApp), need)
+		}
 		return m.startTask(taskSetupApp, stepTitle(taskSetupApp))
 	case actCheck:
+		if need := secretNeeds(m.cfg, m.hasSecret); len(need) > 0 {
+			return m.beginAsk(taskCheck, stepTitle(taskCheck), need)
+		}
 		return m.startTask(taskCheck, stepTitle(taskCheck))
 	case actRefreshLogos:
 		return m.startTask(taskRefreshLogos, stepTitle(taskRefreshLogos))
@@ -900,7 +1050,7 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 		if err := setup.PatchAppLogos(cfg.AppDir, emit); err != nil {
 			emit("AVISO LOGOS: " + err.Error())
 		}
-		if !cfg.UseWinAuth {
+		if cfg.DbMode == config.DbDocker && !cfg.UseWinAuth {
 			if appPass == "" {
 				return fmt.Errorf("falta %s para el parche _DOCKER", envAppPassword)
 			}
@@ -1010,6 +1160,10 @@ func (m Model) View() tea.View {
 		content = m.viewServer()
 	case screenDatabase:
 		content = m.viewDatabase()
+	case screenAuth:
+		content = m.viewAuth()
+	case screenSQLUser:
+		content = m.viewSQLUser()
 	case screenAppDir:
 		content = m.viewAppDir()
 	default:
@@ -1032,7 +1186,7 @@ func (m Model) viewMenu() string {
 		badges = append(badges, s.BadgeMuted.Render("OPERADOR: ANÓNIMO"))
 	}
 	b.WriteString(fmt.Sprintf("%s  %s  %s\n\n", s.AppTitle.Render("AEGIS SETUP"), strings.Join(badges, "  "), s.Subtitle.Render("v"+version.Current)))
-	b.WriteString(s.Muted.Render(fmt.Sprintf("db_mode=%s · server=%s · db=%s", m.cfg.DbMode, m.cfg.Server, m.cfg.Database)) + "\n")
+	b.WriteString(s.Muted.Render(fmt.Sprintf("db_mode=%s · server=%s · db=%s · auth=%s", m.cfg.DbMode, m.cfg.Server, m.cfg.Database, authLabel(m.cfg))) + "\n")
 	b.WriteString(m.checklistLine() + "\n\n")
 	b.WriteString(s.SectionHeader.Render("FLUJO PRINCIPAL") + "\n")
 	for i, it := range menuItems {
@@ -1213,6 +1367,50 @@ func (m Model) viewDatabase() string {
 	} {
 		b.WriteString("  " + s.Value.Render(e[0]) + "  " + s.Muted.Render(e[1]) + "\n")
 	}
+	b.WriteString("\n" + s.HelpBar.Render(
+		s.Key.Render("[Enter]")+s.Desc.Render(" aceptar   ")+
+			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
+	return s.Box.Render(b.String())
+}
+
+// viewAuth pregunta el método de autenticación contra SQL Server.
+func (m Model) viewAuth() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("AUTENTICACIÓN DE SQL SERVER") + "\n")
+	b.WriteString(s.Subtitle.Render("¿Cómo se autentica SIDC contra la base de datos?") + "\n\n")
+	b.WriteString(s.SectionHeader.Render("MÉTODO DE ACCESO") + "\n")
+	for i, opt := range authOptions {
+		cur := "  "
+		if m.authCursor == i {
+			cur = s.Cursor.Render("> ")
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s\n    %s\n\n",
+			cur,
+			s.Key.Render("["+opt.key+"]"),
+			s.Value.Render(opt.name),
+			s.Muted.Render(opt.desc),
+		))
+	}
+	b.WriteString(s.HelpBar.Render(
+		s.Key.Render("[↑↓/Enter]")+s.Desc.Render(" elegir   ")+
+			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
+	return s.Box.Render(b.String())
+}
+
+// viewSQLUser pide el usuario de SQL Server cuando se eligió SQL Auth.
+func (m Model) viewSQLUser() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("USUARIO DE SQL SERVER") + "\n\n")
+	b.WriteString(s.Value.Render("¿Usuario de SQL Server para SIDC?") + "\n\n")
+	b.WriteString("  " + m.userInput.View() + "\n")
+	if m.userErr != "" {
+		b.WriteString("\n" + s.Error.Render("✖ ") + s.Value.Render(m.userErr) + "\n")
+	}
+	b.WriteString("\n" + s.SectionHeader.Render("EJEMPLOS") + "\n")
+	b.WriteString("  " + s.Value.Render("sidc") + "  " + s.Muted.Render("usuario nativo SQL estándar con permisos de db_owner") + "\n")
+	b.WriteString("  " + s.Value.Render("sa") + "    " + s.Muted.Render("administrador de la instancia SQL Server") + "\n")
 	b.WriteString("\n" + s.HelpBar.Render(
 		s.Key.Render("[Enter]")+s.Desc.Render(" aceptar   ")+
 			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
