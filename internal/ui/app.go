@@ -17,6 +17,7 @@ import (
 	"aegis-setup/internal/setup"
 	"aegis-setup/internal/version"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
@@ -417,6 +418,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case screenWorking:
 			return m, nil
 		}
+	default:
+		switch m.screen {
+		case screenLogin:
+			var cmd tea.Cmd
+			m.login, cmd = m.login.update(msg)
+			return m, cmd
+		case screenServer:
+			return m.updateServer(msg)
+		case screenDatabase:
+			return m.updateDatabase(msg)
+		case screenSQLUser:
+			return m.updateSQLUser(msg)
+		case screenAppDir:
+			return m.updateAppDir(msg)
+		case screenAsk:
+			return m.updateAsk(msg)
+		case screenDone, screenHelp, screenChecklist:
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
 	}
 	return m, nil
 }
@@ -573,6 +595,7 @@ func newServerInput(sugerencia string) textinput.Model {
 	// no ve lo que escribe ni el ejemplo de la sugerencia.
 	ti.SetWidth(40)
 	ti.CharLimit = 128
+	ti.KeyMap.Paste = key.NewBinding(key.WithKeys("ctrl+v", "ctrl+alt+v"))
 	ti.Focus()
 	return ti
 }
@@ -623,26 +646,28 @@ func newAppDirInput(valor, ejemplo string) textinput.Model {
 	return ti
 }
 
-func (m Model) updateServer(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		// Vuelve a preguntar qué PC es: si venía del arranque, el perfil sigue sin
-		// elegir y no se puede caer al menú.
-		m.srvErr = ""
-		if m.primeraVez {
-			m.screen = screenPerfil
+func (m Model) updateServer(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			// Vuelve a preguntar qué PC es: si venía del arranque, el perfil sigue sin
+			// elegir y no se puede caer al menú.
+			m.srvErr = ""
+			if m.primeraVez {
+				m.screen = screenPerfil
+				return m, nil
+			}
+			m.screen = screenMenu
 			return m, nil
+		case "enter":
+			server := strings.TrimSpace(m.srvInput.Value())
+			if server == "" {
+				m.srvErr = "Poné el nombre del servidor (ej. CONTABILIDAD, SIDC01 o CONTABILIDAD\\SQLEXPRESS)."
+				return m, nil
+			}
+			m.presetServer = server
+			return m.siguientePregunta("")
 		}
-		m.screen = screenMenu
-		return m, nil
-	case "enter":
-		server := strings.TrimSpace(m.srvInput.Value())
-		if server == "" {
-			m.srvErr = "Poné el nombre del servidor (ej. CONTABILIDAD, SIDC01 o CONTABILIDAD\\SQLEXPRESS)."
-			return m, nil
-		}
-		m.presetServer = server
-		return m.siguientePregunta("")
 	}
 	var cmd tea.Cmd
 	m.srvInput, cmd = m.srvInput.Update(msg)
@@ -651,27 +676,29 @@ func (m Model) updateServer(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 var dbValidRe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
-func (m Model) updateDatabase(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.dbErr = ""
-		if m.primeraVez {
-			m.screen = screenPerfil
+func (m Model) updateDatabase(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			m.dbErr = ""
+			if m.primeraVez {
+				m.screen = screenPerfil
+				return m, nil
+			}
+			m.screen = screenMenu
 			return m, nil
+		case "enter":
+			db := strings.TrimSpace(m.dbInput.Value())
+			if db == "" {
+				db = "SIDC"
+			}
+			if !dbValidRe.MatchString(db) {
+				m.dbErr = "Nombre de base de datos inválido (solo letras, números y guión bajo)."
+				return m, nil
+			}
+			m.presetDB = db
+			return m.siguientePregunta("")
 		}
-		m.screen = screenMenu
-		return m, nil
-	case "enter":
-		db := strings.TrimSpace(m.dbInput.Value())
-		if db == "" {
-			db = "SIDC"
-		}
-		if !dbValidRe.MatchString(db) {
-			m.dbErr = "Nombre de base de datos inválido (solo letras, números y guión bajo)."
-			return m, nil
-		}
-		m.presetDB = db
-		return m.siguientePregunta("")
 	}
 	var cmd tea.Cmd
 	m.dbInput, cmd = m.dbInput.Update(msg)
@@ -718,24 +745,26 @@ func (m Model) seleccionarAuth(winAuth bool) (tea.Model, tea.Cmd) {
 	return m.siguientePregunta("")
 }
 
-func (m Model) updateSQLUser(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.userErr = ""
-		m.presetWinAuth = nil
-		m.screen = screenAuth
-		return m, nil
-	case "enter":
-		user := strings.TrimSpace(m.userInput.Value())
-		if user == "" {
-			user = m.sugerenciaSQLUser()
-		}
-		if user == "" {
-			m.userErr = "El usuario no puede quedar vacío."
+func (m Model) updateSQLUser(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			m.userErr = ""
+			m.presetWinAuth = nil
+			m.screen = screenAuth
 			return m, nil
+		case "enter":
+			user := strings.TrimSpace(m.userInput.Value())
+			if user == "" {
+				user = m.sugerenciaSQLUser()
+			}
+			if user == "" {
+				m.userErr = "El usuario no puede quedar vacío."
+				return m, nil
+			}
+			m.presetSQLUser = user
+			return m.siguientePregunta("")
 		}
-		m.presetSQLUser = user
-		return m.siguientePregunta("")
 	}
 	var cmd tea.Cmd
 	m.userInput, cmd = m.userInput.Update(msg)
@@ -745,40 +774,42 @@ func (m Model) updateSQLUser(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // updateAppDir pregunta dónde está la carpeta de SIDC. Valida antes de guardar: una ruta
 // relativa se resolvería contra el directorio de trabajo del proceso, así que la misma
 // config mediría carpetas distintas según desde dónde se lance Aegis.
-func (m Model) updateAppDir(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		// Igual que el nombre del servidor: si venía del arranque, el perfil sigue sin
-		// elegir y caer al menú dejaría la config por defecto, que no es la de esta PC.
-		m.dirErr = ""
-		if m.perfilPendiente == actConfigManual {
-			if m.presetWinAuth != nil && !*m.presetWinAuth {
-				m.screen = screenSQLUser
+func (m Model) updateAppDir(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			// Igual que el nombre del servidor: si venía del arranque, el perfil sigue sin
+			// elegir y caer al menú dejaría la config por defecto, que no es la de esta PC.
+			m.dirErr = ""
+			if m.perfilPendiente == actConfigManual {
+				if m.presetWinAuth != nil && !*m.presetWinAuth {
+					m.screen = screenSQLUser
+					return m, nil
+				}
+				m.screen = screenAuth
 				return m, nil
 			}
-			m.screen = screenAuth
+			if m.primeraVez {
+				m.screen = screenPerfil
+				return m, nil
+			}
+			m.screen = screenMenu
 			return m, nil
+		case "enter":
+			dir := strings.TrimSpace(m.dirInput.Value())
+			if dir == "" {
+				m.dirErr = "Poné la carpeta donde está SIDC (ej. C:\\SIDC). Es la que tiene el .exe de SIDC y la carpeta Reportes."
+				return m, nil
+			}
+			// La ruta relativa se rechaza acá y no en Validate: así el operador corrige en
+			// la misma pantalla en vez de caer al error del perfil y tener que empezar de
+			// nuevo. El motivo es el mismo: se resolvería contra el directorio de trabajo.
+			if !config.RutaAbsoluta(dir) {
+				m.dirErr = "Poné la ruta completa, con la letra del disco (ej. C:\\SIDC): " + dir + " se resolvería desde donde se lance Aegis."
+				return m, nil
+			}
+			return m.siguientePregunta(dir)
 		}
-		if m.primeraVez {
-			m.screen = screenPerfil
-			return m, nil
-		}
-		m.screen = screenMenu
-		return m, nil
-	case "enter":
-		dir := strings.TrimSpace(m.dirInput.Value())
-		if dir == "" {
-			m.dirErr = "Poné la carpeta donde está SIDC (ej. C:\\SIDC). Es la que tiene el .exe de SIDC y la carpeta Reportes."
-			return m, nil
-		}
-		// La ruta relativa se rechaza acá y no en Validate: así el operador corrige en
-		// la misma pantalla en vez de caer al error del perfil y tener que empezar de
-		// nuevo. El motivo es el mismo: se resolvería contra el directorio de trabajo.
-		if !config.RutaAbsoluta(dir) {
-			m.dirErr = "Poné la ruta completa, con la letra del disco (ej. C:\\SIDC): " + dir + " se resolvería desde donde se lance Aegis."
-			return m, nil
-		}
-		return m.siguientePregunta(dir)
 	}
 	var cmd tea.Cmd
 	m.dirInput, cmd = m.dirInput.Update(msg)
@@ -861,36 +892,38 @@ func authLabel(cfg config.Config) string {
 
 // updateAsk maneja el prompt de claves: una por vez, sin eco, con validación
 // antes de arrancar (así no se descubre al final que la clave no servía).
-func (m Model) updateAsk(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		m.screen = screenMenu
-		m.askQueue = nil
-		m.askErr = ""
-		return m, nil
-	case "enter":
-		name := m.askQueue[0]
-		value := m.askInput.Value()
-		if err := validateSecret(m.cfg, name, value); err != nil {
-			m.askErr = err.Error()
+func (m Model) updateAsk(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			m.screen = screenMenu
+			m.askQueue = nil
+			m.askErr = ""
+			return m, nil
+		case "enter":
+			name := m.askQueue[0]
+			value := m.askInput.Value()
+			if err := validateSecret(m.cfg, name, value); err != nil {
+				m.askErr = err.Error()
+				return m, nil
+			}
+			m.secrets[name] = value
+			m.askQueue = m.askQueue[1:]
+			m.askErr = ""
+			if len(m.askQueue) == 0 {
+				task := m.pendingTask
+				taskName := m.pendingTaskName
+				m.pendingTask = taskNone
+				m.pendingTaskName = ""
+				if task == taskNone {
+					task = taskInstall
+					taskName = "INSTALACIÓN COMPLETA"
+				}
+				return m.startTask(task, taskName)
+			}
+			m.askInput = newSecretInput()
 			return m, nil
 		}
-		m.secrets[name] = value
-		m.askQueue = m.askQueue[1:]
-		m.askErr = ""
-		if len(m.askQueue) == 0 {
-			task := m.pendingTask
-			taskName := m.pendingTaskName
-			m.pendingTask = taskNone
-			m.pendingTaskName = ""
-			if task == taskNone {
-				task = taskInstall
-				taskName = "INSTALACIÓN COMPLETA"
-			}
-			return m.startTask(task, taskName)
-		}
-		m.askInput = newSecretInput()
-		return m, nil
 	}
 	var cmd tea.Cmd
 	m.askInput, cmd = m.askInput.Update(msg)
@@ -902,6 +935,7 @@ func newSecretInput() textinput.Model {
 	ti.EchoMode = textinput.EchoPassword
 	ti.EchoCharacter = '•'
 	ti.Placeholder = "(no se muestra)"
+	ti.KeyMap.Paste = key.NewBinding(key.WithKeys("ctrl+v", "ctrl+alt+v"))
 	ti.Focus()
 	return ti
 }

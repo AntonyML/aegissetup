@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -43,6 +44,7 @@ func newLoginModel(authMgr *auth.Manager, styles Styles) loginModel {
 	inputs[0].Focus()
 	inputs[0].CharLimit = 120
 	inputs[0].SetWidth(42)
+	inputs[0].KeyMap.Paste = key.NewBinding(key.WithKeys("ctrl+v", "ctrl+alt+v"))
 
 	// 1: Contraseña
 	inputs[1] = textinput.New()
@@ -50,6 +52,7 @@ func newLoginModel(authMgr *auth.Manager, styles Styles) loginModel {
 	inputs[1].EchoMode = textinput.EchoPassword
 	inputs[1].CharLimit = 100
 	inputs[1].SetWidth(42)
+	inputs[1].KeyMap.Paste = key.NewBinding(key.WithKeys("ctrl+v", "ctrl+alt+v"))
 
 	return loginModel{
 		authMgr: authMgr,
