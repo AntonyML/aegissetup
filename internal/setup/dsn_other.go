@@ -17,3 +17,7 @@ func WriteDSN(cfg config.Config, appPass string, savePWD bool, out func(string))
 func ReadDSN(dsn string) (map[string]string, error) {
 	return nil, errors.New("DSN solo se lee en Windows")
 }
+
+func DSNPassword(dsn string) string {
+	return ""
+}

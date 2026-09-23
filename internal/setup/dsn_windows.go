@@ -6,6 +6,7 @@ package setup
 
 import (
 	"fmt"
+	"strings"
 
 	"aegis-setup/internal/config"
 
@@ -103,4 +104,18 @@ func ReadDSN(dsn string) (map[string]string, error) {
 		}
 	}
 	return m, nil
+}
+
+// DSNPassword devuelve la clave guardada en el DSN ODBC de 32 bits, o vacío si no está o falla.
+func DSNPassword(dsn string) string {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\WOW6432Node\ODBC\ODBC.INI\`+dsn, registry.QUERY_VALUE)
+	if err != nil {
+		return ""
+	}
+	defer k.Close()
+	pwd, _, err := k.GetStringValue("PWD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(pwd)
 }
