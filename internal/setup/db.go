@@ -112,21 +112,71 @@ func localStatNeeded(cfg config.Config, bakPath string) bool {
 const PuertoPorDefecto = "1433"
 
 // HostPuerto convierte el "host,puerto" que usa ODBC al "host:puerto" que hablan la
-// red y los drivers.
+// red y los drivers. Limpia espacios alrededor de coma o dos puntos.
 //
 // Tres casos, y los tres importan:
 //
-//   - "localhost,14333" -> "localhost:14333"
+//   - "localhost,14333" o "localhost, 14333" -> "localhost:14333"
 //   - "localhost" o "CONTABILIDAD" -> le agrega :1433. Sin esto, net.Dial falla con
 //     "missing port in address" y una máquina sana queda en rojo.
 //   - "localhost\SQLEXPRESS" -> se deja tal cual. Una instancia con nombre negocia
 //     el puerto por SQL Browser; forzarle el 1433 la rompe.
 func HostPuerto(server string) string {
-	s := strings.Replace(server, ",", ":", 1)
+	s := strings.TrimSpace(server)
+	if idx := strings.Index(s, ","); idx >= 0 {
+		s = strings.TrimSpace(s[:idx]) + ":" + strings.TrimSpace(s[idx+1:])
+	} else if idx := strings.LastIndex(s, ":"); idx >= 0 {
+		despues := strings.TrimSpace(s[idx+1:])
+		if esSoloDigitos(despues) && despues != "" {
+			s = strings.TrimSpace(s[:idx]) + ":" + despues
+		}
+	}
 	if strings.Contains(s, "\\") || tienePuerto(s) {
 		return s
 	}
 	return s + ":" + PuertoPorDefecto
+}
+
+func esSoloDigitos(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// SepararHostPuerto divide "host,puerto" o "host:puerto" en host y puerto limpios.
+// Si no hay puerto, devuelve el host y puerto vacío.
+func SepararHostPuerto(server string) (host, port string) {
+	s := strings.TrimSpace(server)
+	if idx := strings.Index(s, ","); idx >= 0 {
+		return strings.TrimSpace(s[:idx]), strings.TrimSpace(s[idx+1:])
+	}
+	if idx := strings.LastIndex(s, ":"); idx >= 0 {
+		bracketIdx := strings.LastIndex(s, "]")
+		if bracketIdx < 0 || idx > bracketIdx {
+			p := strings.TrimSpace(s[idx+1:])
+			if esSoloDigitos(p) {
+				return strings.TrimSpace(s[:idx]), p
+			}
+		}
+	}
+	return s, ""
+}
+
+// UnirHostPuerto combina host y puerto en el formato estándar de ODBC ("host,puerto").
+// Si el puerto está vacío, devuelve solo el host.
+func UnirHostPuerto(host, port string) string {
+	h := strings.TrimSpace(host)
+	p := strings.TrimSpace(port)
+	if p == "" {
+		return h
+	}
+	return h + "," + p
 }
 
 // TienePuerto distingue "localhost:1433" de "localhost". Un ':' seguido de algo que
@@ -164,7 +214,19 @@ func adminDSN(cfg config.Config, saPass string) string {
 }
 
 func urlEscape(s string) string {
-	r := strings.NewReplacer(":", "%3A", "@", "%3A", "/", "%2F", "?", "%3F", "#", "%23", " ", "%20", "*", "%2A")
+	r := strings.NewReplacer(
+		"%", "%25",
+		":", "%3A",
+		"@", "%40",
+		"/", "%2F",
+		"\\", "%5C",
+		"?", "%3F",
+		"#", "%23",
+		" ", "%20",
+		"*", "%2A",
+		"&", "%26",
+		"+", "%2B",
+	)
 	return r.Replace(s)
 }
 
@@ -324,7 +386,7 @@ func openAdmin(ctx context.Context, cfg config.Config, saPass string) (*sql.DB, 
 	var dsn string
 	if saPass == "" {
 		// Windows Auth (prod local/server con AD).
-		srv := strings.Replace(cfg.Server, ",", ":", 1)
+		srv := URLHost(cfg.Server)
 		dsn = fmt.Sprintf("sqlserver://%s?database=master&dial+timeout=15&encrypt=disable&trusted+connection=yes", srv)
 	} else {
 		dsn = adminDSN(cfg, saPass)

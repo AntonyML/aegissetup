@@ -19,30 +19,36 @@ func TestConfigManualConSQLAuth(t *testing.T) {
 	}
 
 	// 1. Servidor
-	m = escribir(m, "192.168.2.145,54721")
+	m = escribir(m, "192.168.2.145")
+	if m.screen != screenPort {
+		t.Fatalf("pantalla = %v, quiero screenPort", m.screen)
+	}
+
+	// 2. Puerto
+	m = escribir(m, "54721")
 	if m.screen != screenDatabase {
 		t.Fatalf("pantalla = %v, quiero screenDatabase", m.screen)
 	}
 
-	// 2. Base de datos (Enter acepta el default SIDC)
+	// 3. Base de datos (Enter acepta el default SIDC)
 	m = pulsar(m, "enter")
 	if m.screen != screenAuth {
 		t.Fatalf("pantalla = %v, quiero screenAuth", m.screen)
 	}
 
-	// 3. Autenticación: "2" para SQL Server Auth
+	// 4. Autenticación: "2" para SQL Server Auth
 	m = pulsar(m, "2")
 	if m.screen != screenSQLUser {
 		t.Fatalf("pantalla = %v, quiero screenSQLUser", m.screen)
 	}
 
-	// 4. Usuario SQL
+	// 5. Usuario SQL
 	m = escribir(m, "sidc")
 	if m.screen != screenAppDir {
 		t.Fatalf("pantalla = %v, quiero screenAppDir", m.screen)
 	}
 
-	// 5. Carpeta de SIDC
+	// 6. Carpeta de SIDC
 	m = escribir(m, `C:\SIDC`)
 	if m.screen != screenDone {
 		t.Fatalf("pantalla = %v, quiero screenDone", m.screen)
@@ -74,10 +80,17 @@ func TestConfigManualConWindowsAuth(t *testing.T) {
 	m := NewModel(config.Default(), path)
 
 	m = pulsar(m, "1")
-	m = escribir(m, "192.168.2.145,54721")
+	m = escribir(m, "192.168.2.145")
+	if m.screen != screenPort {
+		t.Fatalf("pantalla = %v, quiero screenPort", m.screen)
+	}
+	m = escribir(m, "54721")
+	if m.screen != screenDatabase {
+		t.Fatalf("pantalla = %v, quiero screenDatabase", m.screen)
+	}
 	m = pulsar(m, "enter")
 
-	// 3. Autenticación: "1" para Windows Auth
+	// 4. Autenticación: "1" para Windows Auth
 	m = pulsar(m, "1")
 	if m.screen != screenAppDir {
 		t.Fatalf("pantalla = %v, quiero screenAppDir (Windows Auth no pide usuario)", m.screen)

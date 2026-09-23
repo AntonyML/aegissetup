@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ const (
 	// estamos. Va antes del menú porque el menú ya asume un ambiente.
 	screenPerfil
 	screenServer
+	screenPort
 	screenDatabase
 	screenAuth
 	screenSQLUser
@@ -94,8 +96,10 @@ type Model struct {
 	// presetServer es el server del preset "prod server" vía flag --server.
 	// Vacío = comportamiento por defecto (CONTABILIDAD si la config actual
 	// apunta a localhost, o la config que ya hubiera).
-	presetServer string
-	presetDB     string
+	presetServer  string
+	presetPort    string
+	portConfirmed bool
+	presetDB      string
 	// checks es el último checklist corrido. Vacío = todavía no corrió y por
 	// eso no se bloquea nada: una sonda que no respondió no puede encerrar al
 	// operador.
@@ -114,6 +118,8 @@ type Model struct {
 	// tiene que ser propiedad del campo, no de por dónde pasó el flujo.
 	srvInput textinput.Model
 	srvErr   string
+	portInput textinput.Model
+	portErr   string
 	dbInput  textinput.Model
 	dbErr    string
 	// presetWinAuth y presetSQLUser guardan la elección de autenticación del perfil pendiente.
@@ -187,6 +193,7 @@ func NewModel(cfg config.Config, cfgPath string) Model {
 // CLI). Devuelve una copia con el valor puesto; no muta el original.
 func (m Model) SetPresetServer(s string) Model {
 	m.presetServer = s
+	m.portConfirmed = true
 	return m
 }
 
@@ -332,6 +339,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updatePerfil(msg)
 		case screenServer:
 			return m.updateServer(msg)
+		case screenPort:
+			return m.updatePort(msg)
 		case screenDatabase:
 			return m.updateDatabase(msg)
 		case screenAuth:
@@ -426,6 +435,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case screenServer:
 			return m.updateServer(msg)
+		case screenPort:
+			return m.updatePort(msg)
 		case screenDatabase:
 			return m.updateDatabase(msg)
 		case screenSQLUser:
@@ -497,9 +508,16 @@ func (m Model) aplicarPreset(a action) (tea.Model, tea.Cmd) {
 	m.perfilPendiente = a
 	if a == actConfigManual {
 		m.presetServer = ""
+		m.presetPort = ""
+		m.portConfirmed = false
 		m.presetDB = ""
 		m.presetWinAuth = nil
 		m.presetSQLUser = ""
+	} else if a == actPresetProdServer {
+		if m.presetServer == "" {
+			m.presetPort = ""
+			m.portConfirmed = false
+		}
 	}
 	return m.siguientePregunta("")
 }
@@ -513,6 +531,12 @@ func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
 		m.srvInput = newServerInput(m.sugerenciaServer())
 		m.srvErr = ""
 		m.screen = screenServer
+		return m, nil
+	}
+	if (a == actPresetProdServer || a == actConfigManual) && !m.portConfirmed {
+		m.portInput = newPortInput(m.sugerenciaPort())
+		m.portErr = ""
+		m.screen = screenPort
 		return m, nil
 	}
 	if a == actConfigManual && m.presetDB == "" {
@@ -542,7 +566,8 @@ func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
 		m.screen = screenAppDir
 		return m, nil
 	}
-	return m.aplicarPerfil(a, m.presetServer, appDir)
+	server := setup.UnirHostPuerto(m.presetServer, m.presetPort)
+	return m.aplicarPerfil(a, server, appDir)
 }
 
 // sugerenciaServer es lo único que podemos ofrecer como ejemplo. No se precarga en
@@ -554,9 +579,30 @@ func (m Model) sugerenciaServer() string {
 	}
 	s := m.cfg.Server
 	if s == "" || strings.HasPrefix(s, "localhost") || strings.HasPrefix(s, ".") || s == "127.0.0.1" {
-		return `FEMUCARIBE\AdministradorRed`
+		return "192.168.2.145"
 	}
-	return s
+	h, _ := setup.SepararHostPuerto(s)
+	return h
+}
+
+func (m Model) sugerenciaPort() string {
+	if m.presetPort != "" {
+		return m.presetPort
+	}
+	if m.cfg.Env != "dev" {
+		_, p := setup.SepararHostPuerto(m.cfg.Server)
+		if p != "" {
+			return p
+		}
+	}
+	if strings.Contains(m.presetServer, "\\") {
+		return ""
+	}
+	return setup.PuertoPorDefecto
+}
+
+func newPortInput(sugerencia string) textinput.Model {
+	return newServerInput(sugerencia)
 }
 
 func (m Model) sugerenciaDatabase() string {
@@ -662,15 +708,52 @@ func (m Model) updateServer(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			server := strings.TrimSpace(m.srvInput.Value())
 			if server == "" {
-				m.srvErr = "Poné el nombre del servidor (ej. CONTABILIDAD, SIDC01 o CONTABILIDAD\\SQLEXPRESS)."
+				m.srvErr = "Poné el nombre o IP del servidor (ej. 192.168.2.145, SIDC01 o CONTABILIDAD\\SQLEXPRESS)."
 				return m, nil
 			}
-			m.presetServer = server
+			host, port := setup.SepararHostPuerto(server)
+			m.presetServer = host
+			if port != "" {
+				m.presetPort = port
+			}
+			m.portConfirmed = false
 			return m.siguientePregunta("")
 		}
 	}
 	var cmd tea.Cmd
 	m.srvInput, cmd = m.srvInput.Update(msg)
+	return m, cmd
+}
+
+func (m Model) updatePort(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			m.portErr = ""
+			m.presetServer = ""
+			m.presetPort = ""
+			m.portConfirmed = false
+			m.srvInput = newServerInput(m.sugerenciaServer())
+			m.screen = screenServer
+			return m, nil
+		case "enter":
+			port := strings.TrimSpace(m.portInput.Value())
+			if port == "" {
+				port = m.sugerenciaPort()
+			} else {
+				p, err := strconv.Atoi(port)
+				if err != nil || p < 1 || p > 65535 {
+					m.portErr = "Puerto inválido (debe ser un número entre 1 y 65535)."
+					return m, nil
+				}
+			}
+			m.presetPort = port
+			m.portConfirmed = true
+			return m.siguientePregunta("")
+		}
+	}
+	var cmd tea.Cmd
+	m.portInput, cmd = m.portInput.Update(msg)
 	return m, cmd
 }
 
@@ -681,12 +764,8 @@ func (m Model) updateDatabase(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch keyMsg.String() {
 		case "esc":
 			m.dbErr = ""
-			if m.primeraVez {
-				m.screen = screenPerfil
-				return m, nil
-			}
-			m.screen = screenMenu
-			return m, nil
+			m.portConfirmed = false
+			return m.siguientePregunta("")
 		case "enter":
 			db := strings.TrimSpace(m.dbInput.Value())
 			if db == "" {
@@ -789,6 +868,10 @@ func (m Model) updateAppDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenAuth
 				return m, nil
 			}
+			if m.perfilPendiente == actPresetProdServer {
+				m.portConfirmed = false
+				return m.siguientePregunta("")
+			}
 			if m.primeraVez {
 				m.screen = screenPerfil
 				return m, nil
@@ -846,11 +929,14 @@ func (m Model) aplicarPerfil(a action, server, appDir string) (tea.Model, tea.Cm
 	}
 	m.cfg = cfg
 	m.presetServer = ""
+	m.presetPort = ""
+	m.portConfirmed = false
 	m.presetDB = ""
 	m.presetWinAuth = nil
 	m.presetSQLUser = ""
 	m.primeraVez = false
 	m.srvErr = ""
+	m.portErr = ""
 	m.dbErr = ""
 	m.userErr = ""
 	m.dirErr = ""
@@ -1192,6 +1278,8 @@ func (m Model) View() tea.View {
 		content = m.viewPerfil()
 	case screenServer:
 		content = m.viewServer()
+	case screenPort:
+		content = m.viewPort()
 	case screenDatabase:
 		content = m.viewDatabase()
 	case screenAuth:
@@ -1374,6 +1462,30 @@ func (m Model) viewServer() string {
 		{"192.168.1.50", "por IP, si no resuelve por nombre"},
 		{`SIDC01\SQLEXPRESS`, "instancia con nombre (SQL Express)"},
 		{"SIDC01,1433", "puerto explícito, si no es el 1433"},
+	} {
+		b.WriteString("  " + s.Value.Render(e[0]) + "  " + s.Muted.Render(e[1]) + "\n")
+	}
+	b.WriteString("\n" + s.HelpBar.Render(
+		s.Key.Render("[Enter]")+s.Desc.Render(" aceptar   ")+
+			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
+	return s.Box.Render(b.String())
+}
+
+// viewPort pide el puerto TCP de SQL Server.
+func (m Model) viewPort() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("PUERTO DE SQL SERVER") + "\n\n")
+	b.WriteString(s.Value.Render("¿Puerto TCP del motor?") + "\n\n")
+	b.WriteString("  " + m.portInput.View() + "\n")
+	if m.portErr != "" {
+		b.WriteString("\n" + s.Error.Render("✖ ") + s.Value.Render(m.portErr) + "\n")
+	}
+	b.WriteString("\n" + s.SectionHeader.Render("EJEMPLOS") + "\n")
+	for _, e := range [][2]string{
+		{"1433", "puerto estándar de SQL Server"},
+		{"54721", "puerto alternativo si se configuró estático"},
+		{"(vacío)", "dejar vacío para instancias con nombre (SQL Browser)"},
 	} {
 		b.WriteString("  " + s.Value.Render(e[0]) + "  " + s.Muted.Render(e[1]) + "\n")
 	}

@@ -71,3 +71,53 @@ func TestAppDSNNamedInstance(t *testing.T) {
 	}
 }
 
+func TestHostPuertoConEspacios(t *testing.T) {
+	casos := []struct{ in, want string }{
+		{"192.168.2.145, 1433", "192.168.2.145:1433"},
+		{"192.168.2.145 , 1433", "192.168.2.145:1433"},
+		{"192.168.2.145: 1433", "192.168.2.145:1433"},
+		{" 192.168.2.145,54721 ", "192.168.2.145:54721"},
+	}
+	for _, c := range casos {
+		if got := HostPuerto(c.in); got != c.want {
+			t.Errorf("HostPuerto(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestSepararYUnirHostPuerto(t *testing.T) {
+	casos := []struct {
+		in       string
+		wantHost string
+		wantPort string
+	}{
+		{"192.168.2.145,1433", "192.168.2.145", "1433"},
+		{"192.168.2.145, 1433", "192.168.2.145", "1433"},
+		{"192.168.2.145:1433", "192.168.2.145", "1433"},
+		{"192.168.2.145", "192.168.2.145", ""},
+		{`SERVER\SQLEXPRESS`, `SERVER\SQLEXPRESS`, ""},
+		{`SERVER\SQLEXPRESS,1433`, `SERVER\SQLEXPRESS`, "1433"},
+	}
+	for _, c := range casos {
+		h, p := SepararHostPuerto(c.in)
+		if h != c.wantHost || p != c.wantPort {
+			t.Errorf("SepararHostPuerto(%q) = (%q, %q), want (%q, %q)", c.in, h, p, c.wantHost, c.wantPort)
+		}
+		unido := UnirHostPuerto(h, p)
+		if p != "" && unido != c.wantHost+","+c.wantPort {
+			t.Errorf("UnirHostPuerto(%q, %q) = %q, want %q", h, p, unido, c.wantHost+","+c.wantPort)
+		}
+	}
+}
+
+func TestUrlEscape(t *testing.T) {
+	in := `P@ss%w\ord#123 &+`
+	escaped := urlEscape(in)
+	if strings.Contains(escaped, "@") || strings.Contains(escaped, `\`) || strings.Contains(escaped, " ") {
+		t.Errorf("urlEscape(%q) dejó caracteres sin escapar: %q", in, escaped)
+	}
+	if strings.Contains(escaped, "%3A") {
+		t.Errorf("urlEscape no debe mapear @ a %%3A: %q", escaped)
+	}
+}
+

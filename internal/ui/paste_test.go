@@ -30,6 +30,10 @@ func TestPasteBracketedInInputs(t *testing.T) {
 		t.Fatalf("srvInput.Value() = %q, quiero 192.168.2.145,54721", m.srvInput.Value())
 	}
 	m = pulsar(m, "enter")
+	if m.screen != screenPort {
+		t.Fatalf("pantalla = %v, quiero screenPort", m.screen)
+	}
+	m = pulsar(m, "enter")
 	if m.screen != screenDatabase {
 		t.Fatalf("pantalla = %v, quiero screenDatabase", m.screen)
 	}

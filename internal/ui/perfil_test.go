@@ -139,11 +139,14 @@ func TestPerfilProdServerPideElNombre(t *testing.T) {
 		t.Error("el campo no sugiere ningún nombre: el operador no sabe si tipea PC, IP o instancia")
 	}
 
-	// Con el nombre contestado todavía falta la carpeta de SIDC: son dos preguntas y
-	// ninguna de las dos se puede adivinar.
+	// Con el nombre contestado todavía falta el puerto y la carpeta de SIDC.
 	m = escribir(m, "SIDC01")
+	if m.screen != screenPort {
+		t.Fatalf("pantalla = %v, quiero screenPort", m.screen)
+	}
+	m = pulsar(m, "enter")
 	if m.screen != screenAppDir {
-		t.Fatalf("pantalla = %v, quiero screenAppDir (después del servidor viene la carpeta)", m.screen)
+		t.Fatalf("pantalla = %v, quiero screenAppDir (después del puerto viene la carpeta)", m.screen)
 	}
 	m = escribir(m, `D:\SIDC`)
 	if m.taskErr != nil {
@@ -153,8 +156,8 @@ func TestPerfilProdServerPideElNombre(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if guardada.Server != "SIDC01" {
-		t.Errorf("server = %q, quiero SIDC01", guardada.Server)
+	if guardada.Server != "SIDC01,1433" {
+		t.Errorf("server = %q, quiero SIDC01,1433", guardada.Server)
 	}
 	if guardada.DbMode != config.DbServer {
 		t.Errorf("db_mode = %q, quiero server", guardada.DbMode)
