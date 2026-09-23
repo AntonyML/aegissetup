@@ -90,7 +90,8 @@ func TestTecla6ConServerGuardaYActualiza(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	m := NewModel(devCfg(), path).SetPresetServer("MI_SERVIDOR").SetPresetAppDir(`C:\SIDC`)
 
-	m = pulsar(m, "6")
+	m = pulsar(m, "4") // Configuración avanzada
+	m = pulsar(m, "4") // Preset prod server
 	if m.screen != screenDone {
 		t.Fatalf("pantalla = %v, quiero screenDone", m.screen)
 	}

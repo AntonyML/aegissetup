@@ -12,7 +12,7 @@ import (
 // acciones que no son etapas (diagnóstico y presets) no tienen puerta.
 func etapaDe(a action) (precheck.Etapa, bool) {
 	switch a {
-	case actInstall:
+	case actInstall, actRepair:
 		return precheck.EtapaInstall, true
 	case actSetupDB:
 		return precheck.EtapaSetupDB, true

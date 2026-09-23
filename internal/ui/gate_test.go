@@ -225,7 +225,7 @@ func TestOpcionTrabadaExplicaEnVezDeArrancar(t *testing.T) {
 
 	m := NewModel(devCfg(), "")
 	m.checks = checklistFalso(config.DbDocker, precheck.ReqAdmin)
-	m = pulsar(m, "2") // Setup App
+	m = pulsar(m, "2") // Reparar
 
 	if m.screen != screenDone {
 		t.Fatalf("pantalla = %v, quiero la explicación en screenDone", m.screen)
@@ -239,7 +239,7 @@ func TestOpcionTrabadaExplicaEnVezDeArrancar(t *testing.T) {
 	if m.task != taskNone {
 		t.Errorf("arrancó la tarea igual: %v", m.task)
 	}
-	if m.taskName != "Setup App" {
+	if m.taskName != "Reparar" {
 		t.Errorf("no dijo qué opción se bloqueó: %q", m.taskName)
 	}
 	junto := strings.Join(m.lines, "\n")
@@ -259,8 +259,8 @@ func TestOpcionDesbloqueadaArranca(t *testing.T) {
 	m.checks = checklistFalso(config.DbDocker)
 	m = pulsar(m, "2")
 
-	if m.screen != screenWorking || m.task != taskSetupApp {
-		t.Fatalf("pantalla=%v tarea=%v, quiero que arranque Setup App", m.screen, m.task)
+	if m.screen != screenWorking || m.task != taskRepair {
+		t.Fatalf("pantalla=%v tarea=%v, quiero que arranque Reparar", m.screen, m.task)
 	}
 	if m.bloqueo {
 		t.Error("quedó marcado como bloqueo con el checklist limpio")

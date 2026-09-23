@@ -2,6 +2,7 @@
 package setup
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -257,23 +258,40 @@ func DockerPatchBudget(user string) int {
 // PatchDockerExe crea/copia _DOCKER.exe con UID/PWD embebidos sin alargar
 // el binario: reemplaza "Initial Catalog=SIDC" (20 chars) por
 // "UID=<user>;PWD=<pass>" que debe medir <=20 chars + null.
-// Es solo para Docker/dev con SQL Auth. Prod con Windows Auth no lo necesita.
+// PatchDockerExe crea/copia _DOCKER.exe con UID/PWD embebidos sin alargar
+// el binario: reemplaza "Initial Catalog=SIDC" (20 chars) por
+// "UID=<user>;PWD=<pass>" que debe medir <=20 chars + null.
+// Es idempotente, genera respaldo y verifica integridad de tamaño.
 func PatchDockerExe(appDir, user, pass string, out func(string)) error {
+	user = strings.TrimSpace(user)
+	pass = strings.TrimSpace(pass)
 	if len(pass) > DockerPatchBudget(user) {
 		return fmt.Errorf("UID/PWD muy largos para el parche (max 20 chars en total 'UID=u;PWD=p'): recibí %d",
 			len("UID="+user+";PWD="+pass))
 	}
 	src := filepath.Join(appDir, "Sistema Intergrado de Controles y Presupuesto.exe")
 	dst := filepath.Join(appDir, "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe")
+
+	nu := append(utf16le("UID="+user+";PWD="+pass), 0, 0)
+	old := utf16le("Initial Catalog=SIDC")
+	for len(nu) < len(old) {
+		nu = append(nu, 0, 0)
+	}
+
+	// Idempotencia: si dst ya existe y ya tiene la credencial exacta, no reescribir
+	if dstData, err := os.ReadFile(dst); err == nil {
+		if bytes.Contains(dstData, nu) {
+			out(fmt.Sprintf("_DOCKER.exe ya se encuentra configurado para %s", user))
+			return nil
+		}
+	}
+
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	old := utf16le("Initial Catalog=SIDC")
-	nu := append(utf16le("UID="+user+";PWD="+pass), 0, 0)
-	for len(nu) < len(old) {
-		nu = append(nu, 0, 0)
-	}
+	origLen := len(data)
+
 	count := 0
 	for i := 0; i+len(old) <= len(data); i++ {
 		match := true
@@ -293,6 +311,10 @@ func PatchDockerExe(appDir, user, pass string, out func(string)) error {
 		return fmt.Errorf("no se encontró el string en el exe (¿ya está parchado o es otra versión?)")
 	}
 
+	if len(data) != origLen {
+		return fmt.Errorf("integridad falló: tamaño de _DOCKER.exe (%d) difiere del original (%d)", len(data), origLen)
+	}
+
 	// Si existe Fotos/Principal.jpg, actualizamos los logos en _DOCKER.exe
 	if logoPath := PrincipalLogoPath(appDir); logoPath != "" {
 		if logoFile, err := os.Open(logoPath); err == nil {
@@ -306,6 +328,20 @@ func PatchDockerExe(appDir, user, pass string, out func(string)) error {
 			logoFile.Close()
 		}
 	}
+
+	// Respaldo de _DOCKER.exe si ya existía
+	if _, err := os.Stat(dst); err == nil {
+		bakPath := dst + ".bak"
+		if curDst, err := os.ReadFile(dst); err == nil {
+			_ = os.WriteFile(bakPath, curDst, 0644)
+		}
+	}
+
+	tmpPath := dst + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
 
 	if err := os.WriteFile(dst, data, 0644); err != nil {
 		return err

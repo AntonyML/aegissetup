@@ -18,7 +18,8 @@ func TestPasteBracketedInInputs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	m := NewModel(config.Default(), path)
 
-	// Ir a Configurar conexión (opción 1)
+	// Ir a Configurar conexión (opción 4 -> 1)
+	m = pulsar(m, "4")
 	m = pulsar(m, "1")
 	if m.screen != screenServer {
 		t.Fatalf("pantalla = %v, quiero screenServer", m.screen)
@@ -97,7 +98,8 @@ func TestPasteInAskInput(t *testing.T) {
 	t.Setenv(envSAPassword, "")
 	t.Setenv(envAppPassword, "")
 
-	m := pulsar(NewModel(devCfg(), ""), "0")
+	m := pulsar(NewModel(devCfg(), ""), "1")
+	m = pulsar(m, "enter")
 	if m.screen != screenAsk {
 		t.Fatalf("pantalla = %v, quiero screenAsk", m.screen)
 	}
@@ -136,6 +138,7 @@ func TestPasteInLogin(t *testing.T) {
 
 func TestKeyPasteTriggersCommand(t *testing.T) {
 	m := NewModel(config.Default(), "")
+	m = pulsar(m, "4")
 	m = pulsar(m, "1")
 	if m.screen != screenServer {
 		t.Fatalf("pantalla = %v, quiero screenServer", m.screen)

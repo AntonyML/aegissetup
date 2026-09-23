@@ -55,13 +55,15 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 		err = db.QueryRowContext(qctx, `SELECT DB_NAME(), compatibility_level FROM sys.databases WHERE name = @p1`, cfg.Database).Scan(&dbname, &compat)
 		db.Close()
 		if err != nil {
-			out = append(out, Result{"SQL " + cfg.Database, false, err.Error()})
+			out = append(out, Result{"SQL " + cfg.Database, false, setup.SanitizeSQLError(err, cfg).Error()})
 		} else {
 			out = append(out, Result{"SQL " + cfg.Database, true, fmt.Sprintf("compat=%d", compat)})
 		}
 	}
 
-	if m, err := setup.ReadDSN(cfg.DsnName); err != nil {
+	if valid, diffs := setup.ValidateDSN(cfg, appPass); !valid {
+		out = append(out, Result{"DSN " + cfg.DsnName, false, strings.Join(diffs, "; ")})
+	} else if m, err := setup.ReadDSN(cfg.DsnName); err != nil {
 		out = append(out, Result{"DSN " + cfg.DsnName, false, err.Error()})
 	} else {
 		out = append(out, Result{"DSN " + cfg.DsnName, true, fmt.Sprintf("Server=%s Database=%s", m["Server"], m["Database"])})

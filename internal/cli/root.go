@@ -61,14 +61,26 @@ var (
 // suele ser una donde no hay forma de aceptar un UAC (sesión remota, script, otro
 // usuario).
 var comandosQueEscriben = map[string]bool{
-	"setup-db":  true,
-	"setup-app": true,
-	"uninstall": true,
+	"setup-db":    true,
+	"setup-app":   true,
+	"uninstall":   true,
+	"repair":      true,
+	"install":     true,
+	"patch-logos": true,
 }
 
 // writesToSystem dice si un subcomando modifica la máquina (y por lo tanto necesita
 // permisos de administrador).
-func writesToSystem(sub string) bool { return comandosQueEscriben[sub] }
+func writesToSystem(sub string, args ...string) bool {
+	if sub == "check" {
+		for _, a := range args {
+			if a == "--fix" || a == "-f" {
+				return true
+			}
+		}
+	}
+	return comandosQueEscriben[sub]
+}
 
 // subcomandoDe dice qué subcomando se pidió, sin ejecutar nada. Se apoya en el
 // buscador de cobra para no reimplementar el parseo de banderas (--config toma
@@ -90,7 +102,7 @@ func subcomandoDe(root *cobra.Command, args []string) string {
 // siendo exit 3), y por eso no se devuelve un error para el caso "terminó con
 // código 3": cobra lo imprimiría como un fallo de Aegis, que no es lo que pasó.
 func asegurarAdmin(w io.Writer, sub string, args []string) (bool, int, error) {
-	if !writesToSystem(sub) {
+	if !writesToSystem(sub, args...) {
 		return false, 0, nil
 	}
 	if !setup.NeedsElevation(isAdmin(), skipElevation()) {
@@ -110,7 +122,7 @@ func asegurarAdmin(w io.Writer, sub string, args []string) (bool, int, error) {
 	return true, code, nil
 }
 
-// NewRootCmd crea el comando raíz y registra setup-db, setup-app, check, checklist, bak, dashboard, menu, configure.
+// NewRootCmd crea el comando raíz y registra install, repair, setup-db, setup-app, check, checklist, bak, dashboard, menu, configure.
 func NewRootCmd(exeDir string, cfgLoader func(cfgPath string) (config.Config, error)) *cobra.Command {
 	var configPath string
 	var presetServer, appDir string
@@ -125,16 +137,19 @@ Modos:
   prod -> local (misma PC, Windows Auth) | docker (Docker por red) | server (instancia xxxx).
 
 Subcomandos:
+  install    Instalación completa no interactiva de SIDC (DSN, OCX, Crystal, Logos, Check).
+  repair     Autodetecta y corrige DSN, Crystal runtime, controles OCX y logos de SIDC.
   setup-db   Restaura el .bak como SIDC, compat, collation, logins.
   setup-app  DSN SIDC_SQL 32-bit + OCX legacy + verifica exe/reportes + parche _DOCKER.
   check      Verifica que App y DB se hablan (TCP + SQL + DSN + ficheros).
+             Use --fix para reparar automáticamente componentes desalineados.
   checklist  Requisitos de la máquina en orden: qué falta, por qué y qué lo traba.
              Sale con código 3 si algo traba la instalación, y 0 si no traba nada.
   bak        De dónde bajar el .bak de SIDC y en qué carpeta dejarlo (Aegis no lo baja).
              Sale con código 3 si todavía no hay respaldo.
-	uninstall  Saca lo que instaló Aegis (sin --yes solo muestra el plan, no borra).
+  uninstall  Saca lo que instaló Aegis (sin --yes solo muestra el plan, no borra).
   dashboard  Panel de estado no interactivo (para pegar en un correo de soporte).
-  menu       Menú interactivo (0=instalación completa, 1=db, 2=app, 3=check, 4-6=presets).
+  menu       Menú interactivo (1=instalación completa, 2=reparar, 3=verificar, 4=avanzada).
   configure  Genera config.json inicial.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if isTerminal(os.Stdin) {
@@ -150,6 +165,12 @@ Subcomandos:
 	cmd.PersistentFlags().StringVar(&presetServer, "server", "", "server para el preset 'prod server' del TUI (ej. aegis --server MI_SERVIDOR)")
 	cmd.PersistentFlags().StringVar(&appDir, "app-dir", "", "carpeta donde está SIDC en esta PC (ej. --app-dir C:\\SIDC); sin esto el menú la pregunta")
 
+	cmd.AddCommand(newInstallCmd(func() (config.Config, string, error) {
+		return resolveCfg(exeDir, configPath, cfgLoader)
+	}))
+	cmd.AddCommand(newRepairCmd(func() (config.Config, string, error) {
+		return resolveCfg(exeDir, configPath, cfgLoader)
+	}))
 	cmd.AddCommand(newSetupDbCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}))

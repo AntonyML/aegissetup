@@ -235,17 +235,7 @@ func urlEscape(s string) string {
 // a propósito: si cada uno armara la suya, un cambio en uno solo haría que el
 // checklist y la verificación dijeran cosas distintas de la misma base.
 func AppDSN(cfg config.Config, appPass string) string {
-	srv := URLHost(cfg.Server)
-	if cfg.UseWinAuth {
-		return fmt.Sprintf("sqlserver://%s?database=%s&dial+timeout=10&encrypt=disable&trusted+connection=yes", srv, cfg.Database)
-	}
-	if appPass == "" {
-		appPass = os.Getenv("AEGIS_SQL_PASSWORD")
-		if appPass == "" {
-			appPass = DSNPassword(cfg.DsnName)
-		}
-	}
-	return fmt.Sprintf("sqlserver://%s:%s@%s?database=%s&dial+timeout=10&encrypt=disable", cfg.SQLUser, urlEscape(appPass), srv, cfg.Database)
+	return SQLConnString(cfg, appPass)
 }
 
 // SetupDB restaura el .bak más nuevo como cfg.Database, fija compat,

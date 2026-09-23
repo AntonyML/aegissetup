@@ -12,7 +12,8 @@ func TestConfigManualConSQLAuth(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	m := NewModel(config.Default(), path)
 
-	// Opción 1: Configurar conexión
+	// Opción 4 -> 1: Configurar conexión
+	m = pulsar(m, "4")
 	m = pulsar(m, "1")
 	if m.screen != screenServer {
 		t.Fatalf("pantalla = %v, quiero screenServer", m.screen)
@@ -79,6 +80,7 @@ func TestConfigManualConWindowsAuth(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	m := NewModel(config.Default(), path)
 
+	m = pulsar(m, "4")
 	m = pulsar(m, "1")
 	m = escribir(m, "192.168.2.145")
 	if m.screen != screenPort {

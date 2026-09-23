@@ -123,8 +123,36 @@ func (c Config) Save(path string) error {
 	return os.WriteFile(path, append(data, '\n'), 0644)
 }
 
+// AuthLabel devuelve una representación legible del método de autenticación configurado.
+func (c Config) AuthLabel() string {
+	if c.UseWinAuth {
+		return "Windows Auth"
+	}
+	user := c.SQLUser
+	if user == "" {
+		user = "sidc"
+	}
+	return "SQL Auth (" + user + ")"
+}
+
+// Sanitize limpia espacios en blanco y saltos de línea de todos los campos de texto.
+func (c *Config) Sanitize() {
+	c.Env = strings.TrimSpace(c.Env)
+	c.Server = strings.TrimSpace(c.Server)
+	c.Database = strings.TrimSpace(c.Database)
+	c.DsnName = strings.TrimSpace(c.DsnName)
+	c.Driver = strings.TrimSpace(c.Driver)
+	c.SQLUser = strings.TrimSpace(c.SQLUser)
+	c.Collation = strings.TrimSpace(c.Collation)
+	c.AppDir = strings.TrimSpace(c.AppDir)
+	c.DockerDir = strings.TrimSpace(c.DockerDir)
+	c.BackupDir = strings.TrimSpace(c.BackupDir)
+	c.LegacyDir = strings.TrimSpace(c.LegacyDir)
+}
+
 // Validate chequea sentido antes de tocar SQL, registro o disco.
-func (c Config) Validate() error {
+func (c *Config) Validate() error {
+	c.Sanitize()
 	if c.Env != "dev" && c.Env != "prod" {
 		return fmt.Errorf("config: env debe ser dev|prod, recibí %q", c.Env)
 	}
@@ -164,11 +192,13 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// existeDir dice si la ruta está en disco y es una carpeta.
-func existeDir(p string) bool {
+// ExisteDir dice si la ruta está en disco y es una carpeta.
+func ExisteDir(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
 }
+
+func existeDir(p string) bool { return ExisteDir(p) }
 
 // RutaAbsoluta reconoce las rutas de Windows (C:\, C:/, \\\\servidor\recurso) sin
 // depender del sistema donde corre el proceso: el instalador es de Windows, pero parte

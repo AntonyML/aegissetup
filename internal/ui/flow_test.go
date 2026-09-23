@@ -37,12 +37,16 @@ func escribir(m Model, texto string) Model {
 	return pulsar(m, "enter")
 }
 
-// // La tecla 0 arranca la instalación y si falta clave SQL Auth, la pide.
-func TestTecla0PideLasClavesQueFaltan(t *testing.T) {
+// La tecla 1 abre confirmación y al confirmar pide las claves que faltan.
+func TestTecla1PideLasClavesQueFaltan(t *testing.T) {
 	t.Setenv(envSAPassword, "")
 	t.Setenv(envAppPassword, "")
 
-	m := pulsar(NewModel(devCfg(), ""), "0")
+	m := pulsar(NewModel(devCfg(), ""), "1")
+	if m.screen != screenConfirmInstall {
+		t.Fatalf("pantalla = %v, quiero screenConfirmInstall", m.screen)
+	}
+	m = pulsar(m, "enter")
 	if m.screen != screenAsk {
 		t.Fatalf("pantalla = %v, quiero screenAsk (prompt de claves)", m.screen)
 	}
@@ -54,12 +58,16 @@ func TestTecla0PideLasClavesQueFaltan(t *testing.T) {
 	}
 }
 
-// Con las claves ya en el entorno no hay nada que preguntar: arranca derecho.
-func TestTecla0ConClavesEnEntornoNoPregunta(t *testing.T) {
+// Con las claves ya en el entorno no hay nada que preguntar: arranca derecho tras confirmación.
+func TestTecla1ConClavesEnEntornoNoPregunta(t *testing.T) {
 	t.Setenv(envSAPassword, "Sa*2026*Dev")
 	t.Setenv(envAppPassword, "Dv*123")
 
-	m := pulsar(NewModel(devCfg(), ""), "0")
+	m := pulsar(NewModel(devCfg(), ""), "1")
+	if m.screen != screenConfirmInstall {
+		t.Fatalf("pantalla = %v, quiero screenConfirmInstall", m.screen)
+	}
+	m = pulsar(m, "enter")
 	if m.screen != screenWorking {
 		t.Fatalf("pantalla = %v, quiero screenWorking", m.screen)
 	}
@@ -69,11 +77,15 @@ func TestTecla0ConClavesEnEntornoNoPregunta(t *testing.T) {
 }
 
 // Prod usa Windows Auth: nunca guarda claves, asi que nunca las pide.
-func TestTecla0EnProdNoPideNada(t *testing.T) {
+func TestTecla1EnProdNoPideNada(t *testing.T) {
 	t.Setenv(envSAPassword, "")
 	t.Setenv(envAppPassword, "")
 
-	m := pulsar(NewModel(prodCfg(), ""), "0")
+	m := pulsar(NewModel(prodCfg(), ""), "1")
+	if m.screen != screenConfirmInstall {
+		t.Fatalf("pantalla = %v, quiero screenConfirmInstall", m.screen)
+	}
+	m = pulsar(m, "enter")
 	if m.screen != screenWorking || m.task != taskInstall {
 		t.Fatalf("prod pidio claves: pantalla=%v tarea=%v", m.screen, m.task)
 	}
@@ -87,7 +99,8 @@ func TestPromptPideUnaYDespuesLaOtra(t *testing.T) {
 	t.Setenv(envSAPassword, "")
 	t.Setenv(envAppPassword, "")
 
-	m := pulsar(NewModel(devCfg(), ""), "0")
+	m := pulsar(NewModel(devCfg(), ""), "1")
+	m = pulsar(m, "enter")
 	m = escribir(m, "Dv*123")
 
 	if m.secrets[envAppPassword] != "Dv*123" {
@@ -103,7 +116,8 @@ func TestPromptRechazaClaveQueElParcheNoPuedeEmbeber(t *testing.T) {
 	t.Setenv(envSAPassword, "Sa*2026*Dev")
 	t.Setenv(envAppPassword, "")
 
-	m := pulsar(NewModel(devCfg(), ""), "0")
+	m := pulsar(NewModel(devCfg(), ""), "1")
+	m = pulsar(m, "enter")
 	m = escribir(m, "123456789") // 9 chars con user dev = 21 > 20
 	if m.screen != screenAsk {
 		t.Fatalf("pantalla = %v, arranco con una clave invalida", m.screen)
@@ -118,7 +132,8 @@ func TestPromptEscCancela(t *testing.T) {
 	t.Setenv(envSAPassword, "")
 	t.Setenv(envAppPassword, "")
 
-	m := pulsar(NewModel(devCfg(), ""), "0")
+	m := pulsar(NewModel(devCfg(), ""), "1")
+	m = pulsar(m, "enter")
 	m = pulsar(m, "esc")
 
 	if m.screen != screenMenu {
@@ -137,25 +152,34 @@ func TestTeclasDelMenuEjecutanSuAccion(t *testing.T) {
 	t.Setenv(envSAPassword, "Sa*2026*Dev")
 	t.Setenv(envAppPassword, "Dv*123")
 
-	quiero := map[string]taskKind{
-		"0": taskInstall,
-		"2": taskSetupApp,
-		"3": taskCheck,
-		"7": taskRefreshLogos,
-	}
-	for k, want := range quiero {
-		m := pulsar(NewModel(devCfg(), ""), k)
-		if m.task != want {
-			t.Errorf("tecla %q -> tarea %v, quiero %v", k, m.task, want)
-		}
-		if m.screen != screenWorking {
-			t.Errorf("tecla %q -> pantalla %v, quiero screenWorking", k, m.screen)
-		}
-	}
-	// Tecla 1 es Configurar conexión (abre screenServer)
+	// Tecla 1 es Instalación completa (abre confirmación)
 	m1 := pulsar(NewModel(devCfg(), ""), "1")
-	if m1.screen != screenServer {
-		t.Errorf("tecla 1 -> pantalla %v, quiero screenServer", m1.screen)
+	if m1.screen != screenConfirmInstall {
+		t.Errorf("tecla 1 -> pantalla %v, quiero screenConfirmInstall", m1.screen)
+	}
+
+	// Tecla 2 es Reparar
+	m2 := pulsar(NewModel(devCfg(), ""), "2")
+	if m2.task != taskRepair {
+		t.Errorf("tecla 2 -> tarea %v, quiero taskRepair", m2.task)
+	}
+	if m2.screen != screenWorking {
+		t.Errorf("tecla 2 -> pantalla %v, quiero screenWorking", m2.screen)
+	}
+
+	// Tecla 3 es Verificar (check)
+	m3 := pulsar(NewModel(devCfg(), ""), "3")
+	if m3.task != taskCheck {
+		t.Errorf("tecla 3 -> tarea %v, quiero taskCheck", m3.task)
+	}
+	if m3.screen != screenWorking {
+		t.Errorf("tecla 3 -> pantalla %v, quiero screenWorking", m3.screen)
+	}
+
+	// Tecla 4 es Configuración avanzada
+	m4 := pulsar(NewModel(devCfg(), ""), "4")
+	if m4.screen != screenAdvanced {
+		t.Errorf("tecla 4 -> pantalla %v, quiero screenAdvanced", m4.screen)
 	}
 }
 

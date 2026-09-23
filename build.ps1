@@ -8,7 +8,15 @@ param(
 $ErrorActionPreference = "Stop"
 $root = if (Test-Path (Join-Path $PSScriptRoot "go.mod")) { $PSScriptRoot } else { (Split-Path $PSScriptRoot -Parent) }
 
-# 1. Clean previous build artifacts in bin and dist
+# 1. Detectar y cerrar instancias de aegis.exe en ejecución para evitar bloqueos
+$running = Get-Process aegis -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Host "==> Proceso aegis.exe en ejecución detectado (PIDs: $($running.Id -join ', ')). Finalizando para evitar bloqueo..." -ForegroundColor Yellow
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 400
+}
+
+# 2. Limpieza de artefactos previos en bin/ y dist/
 Write-Host "==> Limpiando artefactos de compilación anteriores..." -ForegroundColor Cyan
 $cleanDirs = @(
     (Join-Path $root "bin"),
@@ -19,7 +27,7 @@ foreach ($dir in $cleanDirs) {
     if (Test-Path $dir) {
         Get-ChildItem -Path $dir -Include *.exe, *.exe~, *.old, *.tmp, *.bak -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
             Write-Host "    Borrando: $($_.FullName)"
-            Remove-Item -Force $_.FullName
+            Remove-Item -Force $_.FullName -ErrorAction SilentlyContinue
         }
     }
 }
@@ -29,7 +37,7 @@ if ($CleanOnly) {
     exit 0
 }
 
-# 2. Build Go binary
+# 3. Compilación limpia con Go
 Write-Host "==> Compilando binario aegis.exe..." -ForegroundColor Cyan
 $binDir = Join-Path $root "bin"
 if (-not (Test-Path $binDir)) {
@@ -42,20 +50,29 @@ if ($Version) {
 }
 
 $targetExe = Join-Path $binDir "aegis.exe"
+$tmpExe = Join-Path $binDir "aegis.exe.tmp"
+
+if (Test-Path $tmpExe) { Remove-Item -Force $tmpExe -ErrorAction SilentlyContinue }
+
 Push-Location $root
 try {
-    go build -v -trimpath -ldflags $ldflags -o $targetExe ./cmd/aegis
+    go build -v -trimpath -ldflags $ldflags -o $tmpExe ./cmd/aegis
 } finally {
     Pop-Location
 }
 
-if (-not (Test-Path $targetExe)) {
-    throw "Error: No se generó el binario en $targetExe"
+if (-not (Test-Path $tmpExe)) {
+    throw "Error: No se generó el binario en $tmpExe"
 }
+
+if (Test-Path $targetExe) {
+    Remove-Item -Force $targetExe -ErrorAction SilentlyContinue
+}
+Move-Item -Force $tmpExe $targetExe
 
 Write-Host "==> Binario generado: $targetExe ($([math]::Round((Get-Item $targetExe).Length / 1MB, 2)) MB)" -ForegroundColor Green
 
-# 3. Test running the binary
+# 4. Verificación de arranque del binario
 Write-Host "==> Verificando ejecución del binario..." -ForegroundColor Cyan
 & $targetExe --help | Out-Null
 if ($LASTEXITCODE -ne 0) {
@@ -63,7 +80,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "==> aegis.exe responde correctamente." -ForegroundColor Green
 
-# 4. Optional: build installer with Inno Setup
+# 5. Opcional: compilación del instalador oficial con Inno Setup
 if ($Installer) {
     Write-Host "==> Compilando instalador Inno Setup..." -ForegroundColor Cyan
     $iscc = if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {

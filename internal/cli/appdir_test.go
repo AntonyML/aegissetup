@@ -85,8 +85,9 @@ func TestConAppDirEnElConfigElCampoVienePrecargado(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// La config existe: no es primera vez, así que se entra por el menú.
+	// La config existe: no es primera vez, así que se entra por el menú (Avanzada -> preset dev).
 	m := pulsarTUI(modeloInicial(cfg, path, opcionesTUI{}), "4")
+	m = pulsarTUI(m, "2")
 
 	if c := m.View().Content; !strings.Contains(c, `D:\SIDC`) {
 		t.Errorf("el prompt no muestra la carpeta que ya estaba configurada; pantalla:\n%s", c)

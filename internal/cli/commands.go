@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"aegis-setup/internal/check"
 	"aegis-setup/internal/config"
 	"aegis-setup/internal/precheck"
+	"aegis-setup/internal/securestore"
 	"aegis-setup/internal/setup"
 
 	"github.com/spf13/cobra"
@@ -116,8 +118,51 @@ func ejecutarSetupApp(cfg config.Config, o setupAppOpts, out func(string)) error
 	return nil
 }
 
+// ejecutarRepair corrige DSN corrupto, instala Crystal y OCX faltantes y aplica parche de logos.
+func ejecutarRepair(cfg config.Config, appPass string, out func(string)) error {
+	out("== AEGIS REPARACIÓN ==")
+	// 1. DSN
+	valid, diffs := setup.ValidateDSN(cfg, appPass)
+	if !valid {
+		out(fmt.Sprintf("DSN desalineado (%s). Reparando...", strings.Join(diffs, "; ")))
+		if err := setup.RepairDSN(cfg, appPass, out); err != nil {
+			out("AVISO DSN: " + err.Error())
+		}
+	} else {
+		out("DSN SIDC_SQL: OK")
+	}
+
+	// 2. Crystal Reports
+	if miss := setup.CheckCrystal(); len(miss) > 0 {
+		out(fmt.Sprintf("Crystal Reports incompleto (%d componentes faltantes). Instalando...", len(miss)))
+		for _, f := range InstalarCrystal(out) {
+			out("CRYSTAL: " + f)
+		}
+	} else {
+		out("Crystal Reports runtime: OK")
+	}
+
+	// 3. OCX
+	out("Verificando controles OCX...")
+	for _, f := range InstalarOCX(cfg.LegacyDir, out) {
+		out("OCX: " + f)
+	}
+
+	// 4. Logos
+	if cfg.AppDir != "" {
+		if err := setup.PatchAppLogos(cfg.AppDir, out); err != nil {
+			out("AVISO LOGOS: " + err.Error())
+		} else {
+			out("Logos: OK")
+		}
+	}
+
+	return nil
+}
+
 func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {
 	var appPass string
+	var fix bool
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Verifica que App y DB se hablan (TCP + SQL + DSN + ficheros)",
@@ -131,6 +176,11 @@ func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {
 			}
 			if appPass == "" {
 				appPass = os.Getenv("AEGIS_SQL_PASSWORD")
+			}
+			if fix {
+				out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
+				_ = ejecutarRepair(cfg, appPass, out)
+				out("")
 			}
 			rs := check.Run(context.Background(), cfg, appPass)
 			fail := 0
@@ -149,6 +199,147 @@ func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&appPass, "app-password", "", "clave login app (o env AEGIS_SQL_PASSWORD)")
+	cmd.Flags().BoolVarP(&fix, "fix", "f", false, "intenta reparar automáticamente DSN, Crystal, OCX y logos si fallan")
+	return cmd
+}
+
+func newRepairCmd(res func() (config.Config, string, error)) *cobra.Command {
+	var appPass string
+	cmd := &cobra.Command{
+		Use:   "repair",
+		Short: "Autodetecta y corrige DSN, Crystal runtime, controles OCX y logos de SIDC",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, err := res()
+			if err != nil {
+				return err
+			}
+			if appPass == "" {
+				appPass = os.Getenv("AEGIS_SQL_PASSWORD")
+			}
+			out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
+			if err := ejecutarRepair(cfg, appPass, out); err != nil {
+				return err
+			}
+			out("\n== VERIFICACIÓN POST-REPARACIÓN ==")
+			rs := check.Run(context.Background(), cfg, appPass)
+			fail := 0
+			for _, r := range rs {
+				mark := "OK  "
+				if !r.OK {
+					mark = "FAIL"
+					fail++
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %-22s %s\n", mark, r.Name, r.Info)
+			}
+			if fail > 0 {
+				return fmt.Errorf("%w: repair: persisten %d fallos", ErrCheckFail, fail)
+			}
+			out("\nREPARACIÓN COMPLETADA EXITOSAMENTE: todos los chequeos OK.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&appPass, "app-password", "", "clave login app (o env AEGIS_SQL_PASSWORD)")
+	return cmd
+}
+
+type installCmdOpts struct {
+	server   string
+	appDir   string
+	database string
+	sqlUser  string
+	appPass  string
+	winAuth  bool
+	yes      bool
+}
+
+func newInstallCmd(res func() (config.Config, string, error)) *cobra.Command {
+	var o installCmdOpts
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Instalación completa no interactiva para terminales SIDC (DSN, OCX, Crystal, Logos, Check)",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, path, err := res()
+			if err != nil && !errors.Is(err, ErrConfig) {
+				return err
+			}
+			if cfg.DsnName == "" {
+				cfg = config.Default()
+			}
+			if o.server != "" {
+				cfg.Server = o.server
+			}
+			if o.appDir != "" {
+				cfg.AppDir = o.appDir
+			}
+			if o.database != "" {
+				cfg.Database = o.database
+			}
+			if o.sqlUser != "" {
+				cfg.SQLUser = o.sqlUser
+			}
+			if cmd.Flags().Changed("win-auth") {
+				cfg.UseWinAuth = o.winAuth
+			} else if o.server != "" || cfg.Server != "" {
+				bestAuth, reason := setup.DetectBestAuth(context.Background(), cfg.Server, cfg.Database)
+				cfg.UseWinAuth = bestAuth
+				fmt.Fprintln(cmd.OutOrStdout(), "AUTODETECCIÓN:", reason)
+			}
+
+			if o.appPass == "" {
+				o.appPass = os.Getenv("AEGIS_SQL_PASSWORD")
+			}
+			if !cfg.UseWinAuth && o.appPass == "" {
+				o.appPass = securestore.ResolvePassword("", func() string { return setup.DSNPassword(cfg.DsnName) })
+			}
+
+			if err := cfg.Validate(); err != nil {
+				return fmt.Errorf("configuración no válida: %w", err)
+			}
+
+			if err := cfg.Save(path); err != nil {
+				return fmt.Errorf("guardar config en %s: %w", path, err)
+			}
+
+			out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
+			out("== AEGIS INSTALL (NO INTERACTIVO) ==")
+			out(fmt.Sprintf("Server: %s | DB: %s | Auth: %s | AppDir: %s", cfg.Server, cfg.Database, cfg.AuthLabel(), cfg.AppDir))
+
+			appOpts := setupAppOpts{
+				appPass: o.appPass,
+				savePWD: !cfg.UseWinAuth,
+				patch:   cfg.DbMode == config.DbDocker && !cfg.UseWinAuth,
+			}
+			if err := ejecutarSetupApp(cfg, appOpts, out); err != nil {
+				return fmt.Errorf("falló setup-app: %w", err)
+			}
+
+			out("\n== VERIFICACIÓN FINAL ==")
+			rs := check.Run(context.Background(), cfg, o.appPass)
+			fail := 0
+			for _, r := range rs {
+				mark := "OK  "
+				if !r.OK {
+					mark = "FAIL"
+					fail++
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s %-22s %s\n", mark, r.Name, r.Info)
+			}
+			if fail > 0 {
+				return fmt.Errorf("%w: instalación completada pero check reportó %d fallos", ErrCheckFail, fail)
+			}
+			out("\nINSTALACIÓN COMPLETADA EXITOSAMENTE.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&o.server, "server", "", "servidor o IP de SQL Server")
+	cmd.Flags().StringVar(&o.appDir, "app-dir", "", "directorio de la aplicación SIDC (ej. C:\\SIDC)")
+	cmd.Flags().StringVar(&o.database, "database", "", "nombre de la base de datos (default SIDC)")
+	cmd.Flags().StringVar(&o.sqlUser, "sql-user", "", "usuario SQL Server (default sidc)")
+	cmd.Flags().StringVar(&o.appPass, "app-password", "", "contraseña SQL Server (o env AEGIS_SQL_PASSWORD)")
+	cmd.Flags().BoolVar(&o.winAuth, "win-auth", false, "forzar uso de Windows Authentication")
+	cmd.Flags().BoolVarP(&o.yes, "yes", "y", false, "confirmar automáticamente sin preguntar")
 	return cmd
 }
 

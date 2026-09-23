@@ -202,7 +202,8 @@ func TestLaCarpetaDelRepoSeDeduceSoloConElLayoutReal(t *testing.T) {
 // perfil, el menú quedaría inalcanzable y parecería que Aegis se reinició.
 func TestEscEnLaCarpetaDesdeElMenuVuelveAlMenu(t *testing.T) {
 	m := NewModel(devCfg(), "")
-	m = pulsar(m, "4") // preset dev desde el menú
+	m = pulsar(m, "4") // configuración avanzada
+	m = pulsar(m, "2") // preset dev
 	if m.screen != screenAppDir {
 		t.Fatalf("pantalla = %v, quiero screenAppDir", m.screen)
 	}

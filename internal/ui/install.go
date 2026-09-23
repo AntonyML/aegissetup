@@ -23,9 +23,11 @@ type action int
 
 const (
 	actInstall action = iota
+	actRepair
+	actCheck
+	actConfigAdvanced
 	actConfigManual
 	actSetupApp
-	actCheck
 	actPresetDev
 	actPresetProdLocal
 	actPresetProdServer
@@ -57,6 +59,8 @@ func stepTitle(k taskKind) string {
 		return "INSTALACIÓN COMPLETA"
 	case taskRefreshLogos:
 		return "REFRESCAR LOGOS"
+	case taskRepair:
+		return "REPARAR"
 	}
 	return "?"
 }

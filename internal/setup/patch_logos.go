@@ -351,6 +351,7 @@ func PatchReportsLogos(repDir string, logoImg image.Image, out func(string)) (in
 }
 
 // PatchLogosFile parchea el ejecutable en disco a partir del archivo de imagen.
+// Es idempotente, genera respaldo .original antes de modificar y verifica integridad de tamaño.
 func PatchLogosFile(exePath, logoPath string, emit func(string)) error {
 	logoFile, err := os.Open(logoPath)
 	if err != nil {
@@ -374,9 +375,25 @@ func PatchLogosFile(exePath, logoPath string, emit func(string)) error {
 	}
 
 	if rep.Total() == 0 {
-		emit(fmt.Sprintf("Sin modificaciones en %s (¿ya estaba parchado?)", filepath.Base(exePath)))
+		emit(fmt.Sprintf("Sin modificaciones en %s (ya estaba actualizado)", filepath.Base(exePath)))
 		return nil
 	}
+
+	if len(patched) != len(data) {
+		return fmt.Errorf("integridad falló: tamaño resultante (%d) difiere del original (%d)", len(patched), len(data))
+	}
+
+	// Respaldo del ejecutable original si aún no existe
+	bakPath := exePath + ".original"
+	if _, err := os.Stat(bakPath); os.IsNotExist(err) {
+		_ = os.WriteFile(bakPath, data, 0644)
+	}
+
+	tmpPath := exePath + ".tmp"
+	if err := os.WriteFile(tmpPath, patched, 0644); err != nil {
+		return fmt.Errorf("guardando temporal %s: %w", tmpPath, err)
+	}
+	defer os.Remove(tmpPath)
 
 	if err := os.WriteFile(exePath, patched, 0644); err != nil {
 		return fmt.Errorf("guardando ejecutable parchado %s: %w", exePath, err)

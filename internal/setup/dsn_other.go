@@ -1,7 +1,6 @@
 //go:build !windows
 
 // © Antony Monge López — Costa Rica — Céd. 604700548
-
 package setup
 
 import (
@@ -18,6 +17,18 @@ func ReadDSN(dsn string) (map[string]string, error) {
 	return nil, errors.New("DSN solo se lee en Windows")
 }
 
+func ReadDSNRaw(dsn string) (map[string]string, error) {
+	return nil, errors.New("DSN solo se lee en Windows")
+}
+
 func DSNPassword(dsn string) string {
 	return ""
+}
+
+func ValidateDSN(cfg config.Config, appPass string) (bool, []string) {
+	return false, []string{"DSN solo disponible en Windows"}
+}
+
+func RepairDSN(cfg config.Config, appPass string, out func(string)) error {
+	return errors.New("DSN solo se repara en Windows")
 }

@@ -43,9 +43,9 @@ terminada la instalación.
 
 ## Compilar
 
-```bash
-cd AegisSetup
-go build -o bin/aegis.exe ./cmd/aegis
+```powershell
+pwsh build.ps1             # Compila bin/aegis.exe con limpieza previa automática
+pwsh build.ps1 -Installer  # Genera binario e instalador Inno Setup en dist/
 ```
 
 El binario queda en `bin/aegis.exe`. La configuración vive en

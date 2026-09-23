@@ -242,7 +242,9 @@ func TestCambiarDePerfilDesdeElMenuTambienRecalcula(t *testing.T) {
 	m.checks = []precheck.Requisito{}
 	m.verificando = false
 
-	out, _ := m.Update(tecla("4")) // preset dev
+	out, _ := m.Update(tecla("4")) // configuración avanzada
+	m = out.(Model)
+	out, _ = m.Update(tecla("2")) // preset dev
 	m = out.(Model)
 	if m.screen != screenAppDir {
 		t.Fatalf("pantalla = %v, quiero screenAppDir (la carpeta es dato de esta PC)", m.screen)
@@ -266,7 +268,7 @@ func TestCambiarDePerfilDesdeElMenuTambienRecalcula(t *testing.T) {
 // arranque y elegir en el menú podrían dar resultados distintos.
 func TestLosPerfilesSonLosPresetsDelMenu(t *testing.T) {
 	delMenu := map[action]bool{}
-	for _, it := range menuItems {
+	for _, it := range advancedItems {
 		delMenu[it.action] = true
 	}
 	quiero := map[action]bool{actPresetDev: true, actPresetProdLocal: true, actPresetProdServer: true}

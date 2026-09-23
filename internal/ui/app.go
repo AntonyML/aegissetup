@@ -15,6 +15,7 @@ import (
 	"aegis-setup/internal/check"
 	"aegis-setup/internal/config"
 	"aegis-setup/internal/precheck"
+	"aegis-setup/internal/securestore"
 	"aegis-setup/internal/setup"
 	"aegis-setup/internal/version"
 
@@ -49,6 +50,8 @@ const (
 	// midiera la máquina donde se programó Aegis en vez de la que está instalando.
 	screenAppDir
 	screenLogin
+	screenConfirmInstall
+	screenAdvanced
 )
 
 type taskKind int
@@ -60,6 +63,7 @@ const (
 	taskCheck
 	taskInstall
 	taskRefreshLogos
+	taskRepair
 )
 
 type taskFinishedMsg struct {
@@ -146,14 +150,19 @@ type Model struct {
 }
 
 var menuItems = []menuEntry{
-	{"0", "Instalación completa", "Setup App + Check (DSN, OCX, Crystal, Logos, Check)", actInstall},
+	{"1", "Instalación completa", "Configura y verifica la estación (DSN, OCX, Crystal, Logos, Check)", actInstall},
+	{"2", "Reparar", "Corrige DSN, Crystal, OCX y logos si fallan", actRepair},
+	{"3", "Verificar", "Verifica que App y DB se hablan (check)", actCheck},
+	{"4", "Configuración avanzada", "Servidor, base de datos, credenciales y presets", actConfigAdvanced},
+}
+
+var advancedItems = []menuEntry{
 	{"1", "Configurar conexión", "Servidor, base de datos, autenticación y carpeta", actConfigManual},
-	{"2", "Setup App", "DSN 32-bit + OCX + verifica app (+parche dev)", actSetupApp},
-	{"3", "Check", "verifica que App y DB se hablan", actCheck},
-	{"4", "Preset dev", "config dev docker localhost,14333", actPresetDev},
-	{"5", "Preset FEMUCARIBE", "FEMUCARIBE\\AdministradorRed, Windows Auth, SIDC", actPresetProdLocal},
-	{"6", "Preset prod server", "config prod servidor en la red, Windows Auth", actPresetProdServer},
-	{"7", "Refrescar logos", "actualiza .exe y Reportes/ desde Fotos/Principal.jpg", actRefreshLogos},
+	{"2", "Preset dev", "config dev docker localhost,14333", actPresetDev},
+	{"3", "Preset FEMUCARIBE", "FEMUCARIBE\\AdministradorRed, Windows Auth, SIDC", actPresetProdLocal},
+	{"4", "Preset prod server", "config prod servidor en la red, Windows Auth", actPresetProdServer},
+	{"5", "Refrescar logos", "actualiza .exe y Reportes/ desde Fotos/Principal.jpg", actRefreshLogos},
+	{"6", "Setup DB", "restaura el .bak como SIDC (compat, collation, logins)", actSetupDB},
 }
 
 // perfiles es la primera pregunta en una PC sin config: en qué PC estamos. Son las
@@ -349,6 +358,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSQLUser(msg)
 		case screenAppDir:
 			return m.updateAppDir(msg)
+		case screenConfirmInstall:
+			return m.updateConfirmInstall(msg)
+		case screenAdvanced:
+			return m.updateAdvanced(msg)
 		case screenMenu:
 			switch msg.String() {
 			case "up", "k":
@@ -564,6 +577,12 @@ func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
 		m.dirInput = newAppDirInput(valor, ejemplo)
 		m.dirErr = ""
 		m.screen = screenAppDir
+		return m, nil
+	}
+	if a == actInstall {
+		m.cfg.AppDir = appDir
+		_ = m.cfg.Save(m.cfgPath)
+		m.screen = screenConfirmInstall
 		return m, nil
 	}
 	server := setup.UnirHostPuerto(m.presetServer, m.presetPort)
@@ -860,6 +879,10 @@ func (m Model) updateAppDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Igual que el nombre del servidor: si venía del arranque, el perfil sigue sin
 			// elegir y caer al menú dejaría la config por defecto, que no es la de esta PC.
 			m.dirErr = ""
+			if m.perfilPendiente == actInstall {
+				m.screen = screenConfirmInstall
+				return m, nil
+			}
 			if m.perfilPendiente == actConfigManual {
 				if m.presetWinAuth != nil && !*m.presetWinAuth {
 					m.screen = screenSQLUser
@@ -897,6 +920,63 @@ func (m Model) updateAppDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.dirInput, cmd = m.dirInput.Update(msg)
 	return m, cmd
+}
+
+func (m Model) updateConfirmInstall(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "Q":
+		m.screen = screenMenu
+		m.cursor = 0
+		return m, nil
+	case "c", "C":
+		m.screen = screenAdvanced
+		m.cursor = 0
+		return m, nil
+	case "enter":
+		if m.cfg.AppDir == "" {
+			valor, ejemplo := m.sugerenciaAppDir()
+			m.dirInput = newAppDirInput(valor, ejemplo)
+			m.dirErr = ""
+			m.screen = screenAppDir
+			m.perfilPendiente = actInstall
+			return m, nil
+		}
+		if need := secretNeeds(m.cfg, m.hasSecret); len(need) > 0 {
+			_ = m.cfg.Save(m.cfgPath)
+			return m.beginAsk(taskInstall, stepTitle(taskInstall), need)
+		}
+		_ = m.cfg.Save(m.cfgPath)
+		return m.startTask(taskInstall, stepTitle(taskInstall))
+	}
+	return m, nil
+}
+
+func (m Model) updateAdvanced(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.cursor < len(advancedItems)-1 {
+			m.cursor++
+		}
+		return m, nil
+	case "enter":
+		return m.startItem(advancedItems[m.cursor].action)
+	case "esc", "q", "Q":
+		m.screen = screenMenu
+		m.cursor = 0
+		return m, nil
+	default:
+		for _, it := range advancedItems {
+			if msg.String() == it.key {
+				return m.startItem(it.action)
+			}
+		}
+	}
+	return m, nil
 }
 
 // aplicarPerfil guarda la config y RECALCULA el checklist. Lo segundo no es un
@@ -1064,10 +1144,40 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 	}
 	switch a {
 	case actInstall:
-		if need := secretNeeds(m.cfg, m.hasSecret); len(need) > 0 {
-			return m.beginAsk(taskInstall, stepTitle(taskInstall), need)
+		// Autodetectar carpeta si está vacía
+		if m.cfg.AppDir == "" {
+			if config.ExisteDir(`C:\SIDC`) {
+				m.cfg.AppDir = `C:\SIDC`
+			} else if d := carpetaDelRepo(); d != "" {
+				m.cfg.AppDir = d
+			}
 		}
-		return m.startTask(taskInstall, stepTitle(taskInstall))
+		// En Docker siempre es SQL Auth. En prod remoto, autodetectar si es WORKGROUP vs Dominio
+		if m.cfg.DbMode != config.DbDocker && m.cfg.Server != "" {
+			if !setup.IsServerLocal(m.cfg.Server) {
+				bestAuth, _ := setup.DetectBestAuth(context.Background(), m.cfg.Server, m.cfg.Database)
+				m.cfg.UseWinAuth = bestAuth
+				if !bestAuth && (m.cfg.SQLUser == "" || m.cfg.SQLUser == "dev") {
+					m.cfg.SQLUser = "sidc"
+				}
+			}
+		}
+		m.screen = screenConfirmInstall
+		return m, nil
+	case actRepair:
+		if need := secretNeeds(m.cfg, m.hasSecret); len(need) > 0 {
+			resolved := securestore.ResolvePassword("", func() string { return setup.DSNPassword(m.cfg.DsnName) })
+			if resolved != "" {
+				m.secrets[envAppPassword] = resolved
+				return m.startTask(taskRepair, stepTitle(taskRepair))
+			}
+			return m.beginAsk(taskRepair, stepTitle(taskRepair), need)
+		}
+		return m.startTask(taskRepair, stepTitle(taskRepair))
+	case actConfigAdvanced:
+		m.screen = screenAdvanced
+		m.cursor = 0
+		return m, nil
 	case actSetupDB:
 		return m.startTask(taskSetupDB, stepTitle(taskSetupDB))
 	case actSetupApp:
@@ -1216,6 +1326,49 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 			}
 		}
 		return nil
+
+	case taskRepair:
+		emit("== REPARACIÓN DE ESTACIÓN ==")
+		// 1. DSN
+		valid, diffs := setup.ValidateDSN(cfg, secret(envAppPassword))
+		if !valid {
+			emit(fmt.Sprintf("DSN desalineado (%s). Reparando...", strings.Join(diffs, "; ")))
+			if err := setup.RepairDSN(cfg, secret(envAppPassword), emit); err != nil {
+				emit("AVISO DSN: " + err.Error())
+			} else {
+				emit("DSN SIDC_SQL reparado.")
+			}
+		} else {
+			emit("DSN SIDC_SQL: OK")
+		}
+
+		// 2. Crystal
+		if miss := setup.CheckCrystal(); len(miss) > 0 {
+			emit(fmt.Sprintf("Crystal Reports incompleto (%d componentes faltantes). Instalando...", len(miss)))
+			instalarCrystal(emit)
+		} else {
+			emit("Crystal Reports runtime: OK")
+		}
+
+		// 3. OCX
+		emit("Verificando controles OCX...")
+		for _, f := range instalarOCX(cfg.LegacyDir, emit) {
+			emit("OCX: " + f)
+		}
+
+		// 4. Logos
+		if cfg.AppDir != "" {
+			if err := setup.PatchAppLogos(cfg.AppDir, emit); err != nil {
+				emit("AVISO LOGOS: " + err.Error())
+			} else {
+				emit("Logos: OK")
+			}
+		}
+
+		// 5. Check
+		emit("")
+		emit("== VERIFICACIÓN FINAL ==")
+		return runStep(ctx, cfg, taskCheck, secret, emit)
 	}
 	return nil
 }
@@ -1288,6 +1441,10 @@ func (m Model) View() tea.View {
 		content = m.viewSQLUser()
 	case screenAppDir:
 		content = m.viewAppDir()
+	case screenConfirmInstall:
+		content = m.viewConfirmInstall()
+	case screenAdvanced:
+		content = m.viewAdvanced()
 	default:
 		content = m.viewMenu()
 	}
@@ -1591,6 +1748,56 @@ func (m Model) viewAppDir() string {
 	b.WriteString("\n" + s.HelpBar.Render(
 		s.Key.Render("[Enter]")+s.Desc.Render(" aceptar   ")+
 			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
+	return s.Box.Render(b.String())
+}
+
+func (m Model) viewConfirmInstall() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("AEGIS SETUP — CONFIRMACIÓN DE INSTALACIÓN") + "\n")
+	b.WriteString(s.Subtitle.Render("Parámetros detectados y listos para aprovisionar esta PC.") + "\n\n")
+
+	b.WriteString(s.SectionHeader.Render("PARÁMETROS DE CONFIGURACIÓN") + "\n")
+	b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Servidor:      "), s.Value.Render(m.cfg.Server)))
+	b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Base de datos: "), s.Value.Render(m.cfg.Database)))
+	b.WriteString(fmt.Sprintf("  %s %s\n", s.Label.Render("Autenticación: "), s.Value.Render(m.cfg.AuthLabel())))
+	appDir := m.cfg.AppDir
+	if appDir == "" {
+		appDir = "(se solicitará al confirmar)"
+	}
+	b.WriteString(fmt.Sprintf("  %s %s\n\n", s.Label.Render("Carpeta SIDC:  "), s.Value.Render(appDir)))
+
+	b.WriteString(s.SectionHeader.Render("ACCIONES AUTOMÁTICAS A EJECUTAR") + "\n")
+	b.WriteString("  " + s.Success.Render("[✔]") + " " + s.Value.Render("DSN SIDC_SQL") + "       " + s.Muted.Render("System DSN 32-bit (HKLM WOW6432Node) con verificación byte a byte") + "\n")
+	b.WriteString("  " + s.Success.Render("[✔]") + " " + s.Value.Render("Crystal Reports") + "    " + s.Muted.Render("Copia runtime embebido a SysWOW64 y registra COM de 32-bit") + "\n")
+	b.WriteString("  " + s.Success.Render("[✔]") + " " + s.Value.Render("Controles OCX") + "      " + s.Muted.Render("Instala y registra controles ActiveX legacy de VB6") + "\n")
+	b.WriteString("  " + s.Success.Render("[✔]") + " " + s.Value.Render("Parche de logos") + "    " + s.Muted.Render("Actualiza ejecutables y reportes (.rpt) desde Fotos/Principal.jpg") + "\n")
+	b.WriteString("  " + s.Success.Render("[✔]") + " " + s.Value.Render("Verificación") + "       " + s.Muted.Render("Diagnóstico integral: TCP, SQL, DSN, Crystal y archivos de app") + "\n\n")
+
+	b.WriteString(s.HelpBar.Render(
+		s.Key.Render("[Enter]")+s.Desc.Render(" confirmar e instalar   ")+
+			s.Key.Render("[C]")+s.Desc.Render(" configuración avanzada   ")+
+			s.Key.Render("[Esc]")+s.Desc.Render(" volver al menú")))
+	return s.Box.Render(b.String())
+}
+
+func (m Model) viewAdvanced() string {
+	s := m.styles
+	var b strings.Builder
+	b.WriteString(s.AppTitle.Render("CONFIGURACIÓN AVANZADA Y AMBIENTES") + "\n")
+	b.WriteString(s.Subtitle.Render("Opciones de configuración manual, presets de red y mantenimiento.") + "\n\n")
+
+	for i, it := range advancedItems {
+		cur := "  "
+		if m.cursor == i {
+			cur = s.Cursor.Render("> ")
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s %s\n", cur, s.Key.Render("["+it.key+"]"), s.Value.Render(it.name), s.Muted.Render("- "+it.desc)))
+	}
+
+	b.WriteString("\n" + s.HelpBar.Render(
+		s.Key.Render("[↑↓/Enter]")+s.Desc.Render(" elegir   ")+
+			s.Key.Render("[Esc/Q]")+s.Desc.Render(" volver al menú principal")))
 	return s.Box.Render(b.String())
 }
 
