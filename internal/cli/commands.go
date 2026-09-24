@@ -104,12 +104,13 @@ func ejecutarSetupApp(cfg config.Config, o setupAppOpts, out func(string)) error
 	for _, f := range InstalarCrystal(out) {
 		out("CRYSTAL PENDIENTE: " + f)
 	}
-	if err := setup.PatchAppLogos(cfg.AppDir, out); err != nil {
-		out("AVISO LOGOS: " + err.Error())
+	// Parchear ejecutables y logos desde _ORIGINAL.exe
+	if cfg.AppDir != "" {
+		if err := setup.PatchSIDCApp(cfg, o.appPass, out); err != nil {
+			out("AVISO APP: " + err.Error())
+		}
 	}
 	if o.patch && !cfg.UseWinAuth {
-		// Mismo corte que el TUI: parchear con clave vacía deja un _DOCKER.exe que
-		// arranca y falla al conectar, que es peor que no generarlo.
 		if o.appPass == "" {
 			return fmt.Errorf("falta AEGIS_SQL_PASSWORD para el parche _DOCKER")
 		}
@@ -118,7 +119,7 @@ func ejecutarSetupApp(cfg config.Config, o setupAppOpts, out func(string)) error
 	return nil
 }
 
-// ejecutarRepair corrige DSN corrupto, instala Crystal y OCX faltantes y aplica parche de logos.
+// ejecutarRepair corrige DSN corrupto, instala Crystal y OCX faltantes y aplica parche de logos y ejecutables.
 func ejecutarRepair(cfg config.Config, appPass string, out func(string)) error {
 	out("== AEGIS REPARACIÓN ==")
 	// 1. DSN
@@ -148,12 +149,12 @@ func ejecutarRepair(cfg config.Config, appPass string, out func(string)) error {
 		out("OCX: " + f)
 	}
 
-	// 4. Logos
+	// 4. Ejecutables y Logos SIDC (regenerados desde _ORIGINAL.exe)
 	if cfg.AppDir != "" {
-		if err := setup.PatchAppLogos(cfg.AppDir, out); err != nil {
-			out("AVISO LOGOS: " + err.Error())
+		if err := setup.PatchSIDCApp(cfg, appPass, out); err != nil {
+			out("AVISO APP: " + err.Error())
 		} else {
-			out("Logos: OK")
+			out("SIDC App: OK (ejecutable y logos sincronizados)")
 		}
 	}
 
@@ -175,7 +176,7 @@ func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {
 				return err
 			}
 			if appPass == "" {
-				appPass = os.Getenv("AEGIS_SQL_PASSWORD")
+				appPass = securestore.ResolvePassword("", func() string { return setup.DSNPassword(cfg.DsnName) })
 			}
 			if fix {
 				out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }

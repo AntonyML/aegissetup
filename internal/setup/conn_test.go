@@ -44,14 +44,16 @@ func TestIsServerLocal(t *testing.T) {
 }
 
 func TestSQLConnStringNoSilentFallback(t *testing.T) {
+	t.Setenv("AEGIS_SQL_PASSWORD", "")
 	cfg := config.Config{
 		Server:     "192.168.2.145,1433",
 		Database:   "SIDC",
 		UseWinAuth: false,
 		SQLUser:    "sidc",
+		DsnName:    "DSN_INEXISTENTE_TEST",
 	}
 
-	// Sin clave: NUNCA debe contener trusted_connection=yes
+	// Sin clave y sin DSN previo: NUNCA debe contener trusted_connection=yes ni password
 	connStr := SQLConnString(cfg, "")
 	if strings.Contains(connStr, "trusted+connection=yes") {
 		t.Errorf("SQLConnString con UseWinAuth=false y pass vacía cayó a trusted connection: %q", connStr)

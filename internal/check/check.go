@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -75,12 +77,36 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 		out = append(out, Result{"CRYSTAL runtime", true, "crpe32 + craxdrt + crviewer presentes"})
 	}
 
+	if !cfg.UseWinAuth && cfg.AppDir != "" {
+		bridgeDll := filepath.Join(cfg.AppDir, "p2sodbc.dll")
+		if _, err := os.Stat(bridgeDll); err != nil {
+			out = append(out, Result{"CRYSTAL bridge", false, "falta p2sodbc.dll en app_dir (reportes darían error 20599)"})
+		} else {
+			out = append(out, Result{"CRYSTAL bridge", true, "p2sodbc.dll presente en app_dir"})
+		}
+	}
+
 	for _, miss := range setup.CheckAppFiles(cfg.AppDir) {
 		out = append(out, Result{"App " + miss, false, "falta"})
 	}
 	if len(out) == 0 || allOK(out) {
 		out = append(out, Result{"App ficheros", true, "exe + ~57 rpt + Principal.jpg"})
 	}
+
+	// Verificación de conexión real de la aplicación SIDC (MSDASQL 32-bit + ejecutable)
+	appExe := filepath.Join(cfg.AppDir, setup.SIDCExeName)
+	if _, err := os.Stat(appExe); err != nil {
+		out = append(out, Result{"SIDC app", false, "ejecutable principal no encontrado (" + setup.SIDCExeName + ")"})
+	} else if connStr, err := setup.ReadExeConnString(appExe); err != nil {
+		out = append(out, Result{"SIDC app", false, "error leyendo cadena del ejecutable: " + err.Error()})
+	} else if !cfg.UseWinAuth && (!strings.Contains(connStr, "UID=") || !strings.Contains(connStr, "PWD=")) {
+		out = append(out, Result{"SIDC app", false, "ejecutable sin credenciales embebidas (fallaría como usuario '')"})
+	} else if ok, info := testMSDASQL32(ctx, connStr); !ok {
+		out = append(out, Result{"SIDC app", false, info})
+	} else {
+		out = append(out, Result{"SIDC app", true, "conexión 32-bit MSDASQL verificada"})
+	}
+
 	return out
 }
 

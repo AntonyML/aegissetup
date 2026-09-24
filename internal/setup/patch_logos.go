@@ -203,7 +203,7 @@ func replaceImages(data []byte, sigHeader []byte, newJPEG []byte) int {
 	return count
 }
 
-// hideOverlayLabels neutraliza los controles Label de VB6 superpuestos.
+// hideOverlayLabels neutraliza los controles Label de VB6 superpuestos o residuales de CAPROBA.
 func hideOverlayLabels(data []byte) int {
 	patterns := [][]byte{
 		[]byte("******* CAPROBA 1981"),
@@ -225,41 +225,33 @@ func hideOverlayLabels(data []byte) int {
 				continue
 			}
 
-			distToJPEG := -1
-			limit := i + 300
-			if limit > len(data)-1 {
-				limit = len(data) - 1
+			// Busca la propiedad de coordenadas 0x05 de VB6 en los 30 bytes posteriores
+			coordLimit := i + patLen + 30
+			if coordLimit > len(data)-9 {
+				coordLimit = len(data) - 9
 			}
-			for k := i; k < limit; k++ {
-				if data[k] == 0xFF && data[k+1] == 0xD8 {
-					distToJPEG = k - i
+			found05 := -1
+			for k := i + patLen; k < coordLimit; k++ {
+				if data[k] == 0x05 {
+					found05 = k
 					break
 				}
 			}
 
-			if distToJPEG > 0 && distToJPEG < 200 {
+			if found05 >= 0 {
 				count++
 				for j := 0; j < patLen; j++ {
 					data[i+j] = 0x20
 				}
 
-				coordLimit := i + patLen + 25
-				if coordLimit > len(data)-9 {
-					coordLimit = len(data) - 9
-				}
-				for k := i + patLen; k < coordLimit; k++ {
-					if data[k] == 0x05 {
-						data[k+1] = 0xD0 // Left = -30000
-						data[k+2] = 0x8A
-						data[k+3] = 0xD0 // Top = -30000
-						data[k+4] = 0x8A
-						data[k+5] = 0x00 // Width = 0
-						data[k+6] = 0x00
-						data[k+7] = 0x00 // Height = 0
-						data[k+8] = 0x00
-						break
-					}
-				}
+				data[found05+1] = 0xD0 // Left = -30000
+				data[found05+2] = 0x8A
+				data[found05+3] = 0xD0 // Top = -30000
+				data[found05+4] = 0x8A
+				data[found05+5] = 0x00 // Width = 0
+				data[found05+6] = 0x00
+				data[found05+7] = 0x00 // Height = 0
+				data[found05+8] = 0x00
 			}
 		}
 	}

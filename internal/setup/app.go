@@ -11,6 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"aegis-setup/internal/config"
+	"aegis-setup/internal/securestore"
 )
 
 // RequiredOCX se REGISTRAN con regsvr32 (son los que dan error 339).
@@ -244,6 +247,257 @@ func (o OrigenOCX) colaDeCarpeta() string {
 		return " y no hay carpeta legacy configurada"
 	}
 	return " ni en " + o.Carpeta
+}
+
+// Nombres de archivos y constantes del ejecutable SIDC en VB6
+const (
+	SIDCExeName         = "Sistema Intergrado de Controles y Presupuesto.exe"
+	SIDCOriginalExeName = "Sistema Intergrado de Controles y Presupuesto_ORIGINAL.exe"
+	SIDCDockerExeName   = "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe"
+	MaxExeConnBudget    = 88
+	SlotExeConnBytes    = 176
+)
+
+// FindOriginalExe ubica el ejecutable original intacto de SIDC.
+// Revisa primero appDir y luego appDir/Respaldo_SIDC.
+// NUNCA modifica ni borra este archivo.
+func FindOriginalExe(appDir string) (string, error) {
+	candidates := []string{
+		filepath.Join(appDir, SIDCOriginalExeName),
+		filepath.Join(appDir, "Respaldo_SIDC", SIDCOriginalExeName),
+	}
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("no se encontró el ejecutable original intacto (%s)", SIDCOriginalExeName)
+}
+
+// BuildExeConnString construye la cadena de conexión optimizada para el buffer UTF-16LE de 88 caracteres del ejecutable.
+// Si useWinAuth es true, no incluye credenciales UID/PWD.
+// Si useWinAuth es false:
+//   1. Intenta incluir Initial Catalog si cabe (máximo 88 chars).
+//   2. Si excede 88 chars, omite Initial Catalog (el DSN ODBC de 32 bits ya apunta a la base de datos).
+//   3. Si aun así excede 88 chars, devuelve error indicando el límite.
+func BuildExeConnString(dsnName, database, user, pass string, useWinAuth bool) (string, error) {
+	dsnName = strings.TrimSpace(dsnName)
+	if dsnName == "" {
+		dsnName = "SIDC_SQL"
+	}
+	database = strings.TrimSpace(database)
+	if database == "" {
+		database = "SIDC"
+	}
+
+	if useWinAuth {
+		return fmt.Sprintf("Provider=MSDASQL.1;Data Source=%s;Initial Catalog=%s;", dsnName, database), nil
+	}
+
+	user = strings.TrimSpace(user)
+	if user == "" {
+		user = "sidc"
+	}
+	pass = strings.TrimSpace(pass)
+
+	// Intento 1: Con Initial Catalog
+	full := fmt.Sprintf("Provider=MSDASQL.1;Data Source=%s;Initial Catalog=%s;UID=%s;PWD=%s;", dsnName, database, user, pass)
+	if len(full) <= MaxExeConnBudget {
+		return full, nil
+	}
+
+	// Intento 2: Sin Initial Catalog (DSN ODBC ya tiene Database=<db>)
+	compact := fmt.Sprintf("Provider=MSDASQL.1;Data Source=%s;UID=%s;PWD=%s;", dsnName, user, pass)
+	if len(compact) <= MaxExeConnBudget {
+		return compact, nil
+	}
+
+	maxPass := MaxExeConnBudget - len(fmt.Sprintf("Provider=MSDASQL.1;Data Source=%s;UID=%s;PWD=;", dsnName, user))
+	return "", fmt.Errorf("contraseña demasiado larga para el ejecutable (máximo %d caracteres con usuario %q, recibí %d)", maxPass, user, len(pass))
+}
+
+// ReadExeConnString extrae la cadena de conexión UTF-16LE del ejecutable SIDC.
+func ReadExeConnString(exePath string) (string, error) {
+	data, err := os.ReadFile(exePath)
+	if err != nil {
+		return "", err
+	}
+	marker := utf16le("Provider=MSDASQL")
+	idx := bytes.Index(data, marker)
+	if idx < 0 {
+		return "", fmt.Errorf("no se encontró la firma de conexión en %s", filepath.Base(exePath))
+	}
+	slot := data[idx:]
+	if len(slot) > SlotExeConnBytes {
+		slot = slot[:SlotExeConnBytes]
+	}
+	var runes []rune
+	for i := 0; i+1 < len(slot); i += 2 {
+		r := rune(uint16(slot[i]) | (uint16(slot[i+1]) << 8))
+		if r == 0 {
+			break
+		}
+		runes = append(runes, r)
+	}
+	return string(runes), nil
+}
+
+// PatchExeBuffer reemplaza la cadena de conexión y opcionalmente los logos en la imagen binaria en memoria.
+func PatchExeBuffer(origData []byte, connStr string, logoImg image.Image) ([]byte, PatchReport, error) {
+	if len(connStr) > MaxExeConnBudget {
+		return nil, PatchReport{}, fmt.Errorf("cadena de conexión excede el presupuesto (%d > %d caracteres)", len(connStr), MaxExeConnBudget)
+	}
+
+	data := make([]byte, len(origData))
+	copy(data, origData)
+
+	marker := utf16le("Provider=MSDASQL")
+	idx := bytes.Index(data, marker)
+	if idx < 0 {
+		return nil, PatchReport{}, fmt.Errorf("no se encontró el slot de conexión MSDASQL en el binario")
+	}
+
+	if idx+SlotExeConnBytes > len(data) {
+		return nil, PatchReport{}, fmt.Errorf("el slot de conexión en 0x%X excede los límites del binario", idx)
+	}
+
+	for k := 0; k < SlotExeConnBytes; k++ {
+		data[idx+k] = 0
+	}
+
+	newBytes := utf16le(connStr)
+	copy(data[idx:idx+len(newBytes)], newBytes)
+
+	var rep PatchReport
+	if logoImg != nil {
+		patched, r, err := PatchLogos(data, logoImg)
+		if err != nil {
+			return nil, PatchReport{}, fmt.Errorf("error aplicando logos: %w", err)
+		}
+		data = patched
+		rep = r
+	}
+
+	if len(data) != len(origData) {
+		return nil, PatchReport{}, fmt.Errorf("integridad falló: tamaño resultante (%d) != original (%d)", len(data), len(origData))
+	}
+
+	return data, rep, nil
+}
+
+// PatchSIDCApp regenera el ejecutable principal (y _DOCKER si aplica) a partir de _ORIGINAL.exe
+// con la cadena de conexión optimizada y los logos actualizados.
+// Es idempotente y nunca modifica ni borra _ORIGINAL.exe ni Respaldo_SIDC.
+func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
+	if cfg.AppDir == "" {
+		return fmt.Errorf("app_dir no configurado")
+	}
+	if out == nil {
+		out = func(string) {}
+	}
+
+	origPath, err := FindOriginalExe(cfg.AppDir)
+	if err != nil {
+		return err
+	}
+
+	origData, err := os.ReadFile(origPath)
+	if err != nil {
+		return fmt.Errorf("leyendo %s: %w", origPath, err)
+	}
+	origLen := len(origData)
+
+	resolvedPass := securestore.ResolvePassword(appPass, func() string {
+		return DSNPassword(cfg.DsnName)
+	})
+
+	connStr, err := BuildExeConnString(cfg.DsnName, cfg.Database, cfg.SQLUser, resolvedPass, cfg.UseWinAuth)
+	if err != nil {
+		return err
+	}
+
+	var logoImg image.Image
+	if logoPath := PrincipalLogoPath(cfg.AppDir); logoPath != "" {
+		if f, err := os.Open(logoPath); err == nil {
+			logoImg, _, _ = image.Decode(f)
+			f.Close()
+		}
+	}
+
+	patchedData, rep, err := PatchExeBuffer(origData, connStr, logoImg)
+	if err != nil {
+		return fmt.Errorf("parcheando buffer: %w", err)
+	}
+
+	type targetExe struct {
+		name string
+	}
+	targets := []targetExe{
+		{name: SIDCExeName},
+	}
+	dockerExe := filepath.Join(cfg.AppDir, SIDCDockerExeName)
+	if _, err := os.Stat(dockerExe); err == nil || cfg.DbMode == config.DbDocker {
+		targets = append(targets, targetExe{name: SIDCDockerExeName})
+	}
+
+	newConnBytes := utf16le(connStr)
+
+	for _, t := range targets {
+		dst := filepath.Join(cfg.AppDir, t.name)
+
+		if curData, err := os.ReadFile(dst); err == nil && len(curData) == origLen {
+			if bytes.Contains(curData, newConnBytes) {
+				out(fmt.Sprintf("%s: ya se encuentra configurado y alineado", t.name))
+				continue
+			}
+		}
+
+		killAppProcess(t.name)
+
+		tmpPath := dst + ".tmp"
+		if err := os.WriteFile(tmpPath, patchedData, 0755); err != nil {
+			return fmt.Errorf("escribiendo temporal %s: %w", tmpPath, err)
+		}
+
+		if fi, err := os.Stat(tmpPath); err != nil || fi.Size() != int64(origLen) {
+			_ = os.Remove(tmpPath)
+			return fmt.Errorf("falló verificación de integridad de tamaño en %s", tmpPath)
+		}
+
+		if err := os.Rename(tmpPath, dst); err != nil {
+			_ = os.Remove(dst)
+			if err2 := os.Rename(tmpPath, dst); err2 != nil {
+				_ = os.Remove(tmpPath)
+				return fmt.Errorf("reemplazando %s: %w", dst, err2)
+			}
+		}
+
+		sanitizedConn := sanitizeConnForLog(connStr, resolvedPass)
+		out(fmt.Sprintf("%s OK: regenerado desde _ORIGINAL.exe (%s, %d logos, %d etiquetas)",
+			t.name, sanitizedConn, rep.FormLogos+rep.Backgrounds+rep.Splashes, rep.Labels))
+	}
+
+	if logoImg != nil {
+		repDir := filepath.Join(cfg.AppDir, "Reportes")
+		if _, err := os.Stat(repDir); err == nil {
+			_, _ = PatchReportsLogos(repDir, logoImg, out)
+		}
+	}
+
+	if !cfg.UseWinAuth && resolvedPass != "" {
+		if err := PatchCrystalODBCBridge(cfg.AppDir, resolvedPass, out); err != nil {
+			out("Aviso: No se pudo configurar el puente ODBC de Crystal: " + err.Error())
+		}
+	}
+
+	return nil
+}
+
+func sanitizeConnForLog(connStr, pass string) string {
+	if pass != "" {
+		return strings.ReplaceAll(connStr, pass, "****")
+	}
+	return connStr
 }
 
 // DockerPatchBudget es el maximo de chars que puede medir la clave del parche
