@@ -120,4 +120,3 @@ func TestUrlEscape(t *testing.T) {
 		t.Errorf("urlEscape no debe mapear @ a %%3A: %q", escaped)
 	}
 }
-
