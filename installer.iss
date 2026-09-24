@@ -8,6 +8,8 @@
 #define MyAppPublisher "Antony Monge López"
 #define MyAppURL "https://github.com/AntonyML/aegissetup"
 #define MyAppExeName "aegis.exe"
+#define SidcExeSuffix "_AegisSetup.exe"
+#define SidcDockerExeTemplate "_Docker_AegisSetup_v<version>.exe"
 
 [Setup]
 AppId={{5E9A8C12-8921-4BA2-9D3E-A0B82F6D173C}

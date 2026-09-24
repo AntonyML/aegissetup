@@ -37,7 +37,33 @@ if ($CleanOnly) {
     exit 0
 }
 
-# 3. Compilación limpia con Go
+# 3. Gate de calidad antes de producir el binario
+Push-Location $root
+try {
+    # El árbol histórico contiene archivos que no pasan el formateador de la
+    # versión actual de Go por comentarios de documentación. El gate sólo
+    # inspecciona el diff de esta compilación y los Go nuevos, sin reescribir
+    # archivos ajenos al cambio.
+    $goChanged = @(
+        git diff --name-only --diff-filter=ACMRT -- '*.go'
+        git ls-files --others --exclude-standard -- '*.go'
+    ) | Where-Object { $_ -and (Test-Path (Join-Path $root $_)) } | Sort-Object -Unique
+    $fmt = if ($goChanged) { gofmt -l $goChanged } else { @() }
+    if ($fmt) { throw "gofmt detectó archivos sin formato: $($fmt -join ', ')" }
+    go vet ./...
+    go test ./... -count=1
+    $oldGOOS = $env:GOOS
+    try {
+        $env:GOOS = "linux"
+        go build ./...
+    } finally {
+        if ($null -eq $oldGOOS) { Remove-Item Env:GOOS -ErrorAction SilentlyContinue } else { $env:GOOS = $oldGOOS }
+    }
+} finally {
+    Pop-Location
+}
+
+# 4. Compilación limpia con Go
 Write-Host "==> Compilando binario aegis.exe..." -ForegroundColor Cyan
 $binDir = Join-Path $root "bin"
 if (-not (Test-Path $binDir)) {
@@ -72,7 +98,7 @@ Move-Item -Force $tmpExe $targetExe
 
 Write-Host "==> Binario generado: $targetExe ($([math]::Round((Get-Item $targetExe).Length / 1MB, 2)) MB)" -ForegroundColor Green
 
-# 4. Verificación de arranque del binario
+# 5. Verificación de arranque del binario
 Write-Host "==> Verificando ejecución del binario..." -ForegroundColor Cyan
 & $targetExe --help | Out-Null
 if ($LASTEXITCODE -ne 0) {
@@ -80,7 +106,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "==> aegis.exe responde correctamente." -ForegroundColor Green
 
-# 5. Opcional: compilación del instalador oficial con Inno Setup
+# 6. Opcional: compilación del instalador oficial con Inno Setup
 if ($Installer) {
     Write-Host "==> Compilando instalador Inno Setup..." -ForegroundColor Cyan
     $iscc = if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {

@@ -93,7 +93,14 @@ jobs:
         run: go vet ./...
 
       - name: 🧪 Tests
-        run: go test ./...
+        run: go test ./... -count=1
+
+      - name: 🐧 Comprobar compilación Linux
+        shell: pwsh
+        run: |
+          $env:GOOS = "linux"
+          go build ./...
+          Remove-Item Env:GOOS
 
       - name: 🏗️ Compilar Binario Go con Versión Inyectada
         shell: pwsh
@@ -142,6 +149,10 @@ jobs:
             | :--- | :--- | :--- |
             | **`AegisSetup-Setup-v${{ steps.semver.outputs.version }}.exe`** | **Instalador Oficial (Inno Setup)** | **Recomendado para Terminales y Servidores.** Asistente guiado de instalación, accesos directos en Menú de Inicio y Escritorio, registro COM/OCX y desinstalador limpio. |
             | **`aegis.exe`** | **Binario Portable (CLI / TUI)** | Ejecutable puro sin instalación. Ideal para tareas automatizadas, CI/CD o ejecución directa desde terminal. |
+
+            Los ejecutables de SIDC generados por esta versión se nombran
+            `Sistema Intergrado de Controles y Presupuesto_AegisSetup.exe` y,
+            para Docker, `Sistema Intergrado de Controles y Presupuesto_Docker_AegisSetup_v${{ steps.semver.outputs.version }}.exe`.
 
             ---
             *Desarrollado para FEMUCARIBE · Costa Rica.*

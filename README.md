@@ -29,7 +29,7 @@ terminada la instalación.
 - **Redirección por DSN** — el DSN es el único punto de conexión: cambiarlo apunta a otro servidor sin tocar el `.exe`.
 - **TUI interactivo** — menú Bubble Tea que **ejecuta** el flujo (no solo lo documenta).
 - **Configuración declarativa** — un `config.json` describe el entorno; los presets de la TUI lo generan por vos.
-- **Verificación real** — `check` prueba TCP + SQL + DSN + archivos y falla con código de salida si algo no cierra.
+- **Verificación real** — `check` prueba TCP + SQL + DSN + MSDASQL del ejecutable, abre una plantilla Crystal con límite de tiempo y verifica Spooler/impresora; falla con código de salida si algo no cierra.
 
 ## Requisitos
 
@@ -59,8 +59,8 @@ viejo junto al binario se sigue leyendo si el canónico todavía no existe.
 | Comando | Función |
 | --- | --- |
 | `setup-db` | Restaura el `.bak` como `SIDC`: collation, compat level, logins y `CHECKDB`. |
-| `setup-app` | Crea el DSN `SIDC_SQL` de 32 bits, instala los OCX legacy, instala el runtime de Crystal embebido y verifica exe/reportes. |
-| `check` | Valida TCP + SQL + DSN + ficheros (App ⇄ DB). Solo lectura. |
+| `setup-app` | Crea el DSN `SIDC_SQL` de 32 bits, instala OCX/Crystal, regenera los ejecutables desde `_ORIGINAL.exe` y parchea las conexiones de los `.rpt`. |
+| `check` | Valida TCP + SQL + DSN + MSDASQL del ejecutable + reportes Crystal + Spooler + impresora. Solo lectura; sale con 3 ante cualquier fallo real. |
 | `checklist` | Requisitos de la máquina en orden: qué falta, por qué importa, cómo se arregla y qué opción queda trabada. Solo lectura. |
 | `bak` | De dónde bajar el `.bak` de SIDC y en qué carpeta dejarlo. Solo lectura; sale con código 3 si todavía no hay respaldo. |
 | `uninstall` | Saca de la PC lo que instaló Aegis (config, datos de máquina, DSN). Sin `--yes` solo muestra el plan. |
@@ -169,7 +169,7 @@ setup-db
 setup-app
   --app-password string  clave del login SQL Auth (o env AEGIS_SQL_PASSWORD)
   --save-pwd             guarda el PWD en el DSN (SOLO dev/docker, nunca prod)
-  --patch-docker         genera _DOCKER.exe con UID/PWD embebidos (solo dev/docker)
+  --patch-docker         genera el ejecutable Docker versionado con UID/PWD (solo dev/docker)
 
 check / checklist / dashboard
   --app-password string  clave del login SQL Auth (o env AEGIS_SQL_PASSWORD)
@@ -377,7 +377,7 @@ AegisSetup/
 │   ├── config/         # config.json, defaults, validación y presets
 │   ├── setup/          # SetupDB, WriteDSN, InstallOCX, PatchDockerExe
 │   ├── precheck/       # checklist de requisitos + política de qué traba qué
-│   ├── check/          # verificación TCP + SQL + DSN + ficheros
+│   ├── check/          # verificación TCP + SQL + Crystal + Spooler/impresora
 │   └── ui/             # TUI Bubble Tea (menú, checklist-puerta, pasos, prompts)
 ├── docker/             # SQL Server 2019 para dev (paquete Go: embed del kit + guía)
 ├── assets/             # backups / legacy / oldpc (sí van al repo: ver Notas técnicas)
@@ -392,7 +392,9 @@ AegisSetup/
 - **OCX legacy**: se copian a `SysWOW64` y se registran con `regsvr32` de 32 bits. Además de los 11 controles, hay 11 DLL de soporte (satélites en español y data binding) que solo se copian.
 - **Crystal Reports**: el runtime completo (43 archivos, 24 MB) viaja dentro de `Aegis.exe`. Setup App lo copia a `SysWOW64` y registra los 4 componentes COM que usan los reportes (`crviewer.dll`, `Crystl32.OCX`, `craxdrt.dll`, `craxddrt.dll`); el resto son dependencias que con existir alcanzan. Se copia solo lo que falta o difiere, y el registro se repite igual (que el archivo esté no quiere decir que esté registrado). `check` valida el mínimo del runtime.
 - **Elevación**: no hay manifiesto `requireAdministrator`, porque dejaría `check`, `checklist` y `dashboard` detrás de un UAC — justo los comandos que se usan cuando algo está mal. En su lugar Aegis se relanza elevado cuando el subcomando escribe en la máquina (`setup-db`, `setup-app`, `uninstall`), y en el menú con `[E]`. El proceso padre espera al hijo y devuelve su mismo código de salida.
-- **Parche `_DOCKER.exe`**: reemplaza `Initial Catalog=SIDC` (20 caracteres) por `UID=<user>;PWD=<pass>` dentro del binario, sin alargarlo. El largo de la clave está acotado por ese espacio — la TUI valida antes de arrancar para no fallar al final.
+- **Nombres reproducibles**: desde el `_ORIGINAL.exe` se genera `Sistema Intergrado de Controles y Presupuesto_AegisSetup.exe`; la variante Docker agrega `_Docker_AegisSetup_v<versión>.exe`, usando la versión única de `internal/version`.
+- **Conexiones Crystal**: en SQL Auth, Aegis cambia `Trusted_Connection=Yes` a `No` en ASCII y UTF-16LE dentro de cada `.rpt`, conservando el tamaño y escribiendo con temporal + reemplazo atómico. No genera una DLL local ni embebe la clave en `p2sodbc.dll`.
+- **Parche Docker**: cuando se solicita, reemplaza `Initial Catalog=SIDC` por `UID=<user>;PWD=<pass>` dentro del binario, sin alargarlo. El límite se valida antes de arrancar.
 - **Checklist-puerta**: `internal/precheck` diagnostica (sondas inyectadas, así se testea sin ser admin, sin Docker y sin SysWOW64) y declara en `trabaPorRequisito` qué etapas traba cada requisito. `internal/ui/gate.go` traduce una tecla del menú a la etapa que le corresponde. La política vive en un solo lugar para que la TUI y `aegis checklist` no puedan discrepar sobre la misma máquina.
 - **Conexión SQL compartida**: el checklist y `check` usan el mismo `setup.AppDSN`, en vez de armar cada uno su cadena: dos constructores distintos terminan reportando cosas distintas de la misma base.
 
