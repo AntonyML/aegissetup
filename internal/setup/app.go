@@ -3,6 +3,9 @@ package setup
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -14,6 +17,7 @@ import (
 
 	"aegis-setup/internal/config"
 	"aegis-setup/internal/securestore"
+	"aegis-setup/internal/version"
 )
 
 // RequiredOCX se REGISTRAN con regsvr32 (son los que dan error 339).
@@ -142,7 +146,7 @@ func CheckAppFiles(appDir string) []string {
 		return []string{"app_dir sin configurar (elegí perfil o pasá --app-dir)"}
 	}
 	var missing []string
-	exe := filepath.Join(appDir, "Sistema Intergrado de Controles y Presupuesto.exe")
+	exe := filepath.Join(appDir, SIDCExeName)
 	if _, err := os.Stat(exe); err != nil {
 		missing = append(missing, "exe: "+exe)
 	}
@@ -251,12 +255,16 @@ func (o OrigenOCX) colaDeCarpeta() string {
 
 // Nombres de archivos y constantes del ejecutable SIDC en VB6
 const (
-	SIDCExeName         = "Sistema Intergrado de Controles y Presupuesto.exe"
-	SIDCOriginalExeName = "Sistema Intergrado de Controles y Presupuesto_ORIGINAL.exe"
-	SIDCDockerExeName   = "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe"
+	SIDCBaseExeName     = "Sistema Intergrado de Controles y Presupuesto"
+	SIDCExeName         = SIDCBaseExeName + "_AegisSetup.exe"
+	SIDCOriginalExeName = SIDCBaseExeName + "_ORIGINAL.exe"
 	MaxExeConnBudget    = 88
 	SlotExeConnBytes    = 176
 )
+
+// SIDCDockerExeName usa la misma versión inyectada en todo el binario de Aegis.
+// Es una variable porque version.Current puede recibir -ldflags en Release.
+var SIDCDockerExeName = SIDCBaseExeName + "_Docker_AegisSetup_v" + version.Current + ".exe"
 
 // FindOriginalExe ubica el ejecutable original intacto de SIDC.
 // Revisa primero appDir y luego appDir/Respaldo_SIDC.
@@ -277,9 +285,9 @@ func FindOriginalExe(appDir string) (string, error) {
 // BuildExeConnString construye la cadena de conexión optimizada para el buffer UTF-16LE de 88 caracteres del ejecutable.
 // Si useWinAuth es true, no incluye credenciales UID/PWD.
 // Si useWinAuth es false:
-//   1. Intenta incluir Initial Catalog si cabe (máximo 88 chars).
-//   2. Si excede 88 chars, omite Initial Catalog (el DSN ODBC de 32 bits ya apunta a la base de datos).
-//   3. Si aun así excede 88 chars, devuelve error indicando el límite.
+//  1. Intenta incluir Initial Catalog si cabe (máximo 88 chars).
+//  2. Si excede 88 chars, omite Initial Catalog (el DSN ODBC de 32 bits ya apunta a la base de datos).
+//  3. Si aun así excede 88 chars, devuelve error indicando el límite.
 func BuildExeConnString(dsnName, database, user, pass string, useWinAuth bool) (string, error) {
 	dsnName = strings.TrimSpace(dsnName)
 	if dsnName == "" {
@@ -441,12 +449,18 @@ func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
 	}
 
 	newConnBytes := utf16le(connStr)
+	manifest := generationManifest{
+		Version:      version.Current,
+		Source:       filepath.Base(origPath),
+		SourceSHA256: sha256Hex(origData),
+	}
 
 	for _, t := range targets {
 		dst := filepath.Join(cfg.AppDir, t.name)
 
 		if curData, err := os.ReadFile(dst); err == nil && len(curData) == origLen {
 			if bytes.Contains(curData, newConnBytes) {
+				manifest.Executables = append(manifest.Executables, manifestFile{Name: t.name, Bytes: len(curData), SHA256: sha256Hex(curData)})
 				out(fmt.Sprintf("%s: ya se encuentra configurado y alineado", t.name))
 				continue
 			}
@@ -471,6 +485,7 @@ func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
 				return fmt.Errorf("reemplazando %s: %w", dst, err2)
 			}
 		}
+		manifest.Executables = append(manifest.Executables, manifestFile{Name: t.name, Bytes: len(patchedData), SHA256: sha256Hex(patchedData)})
 
 		sanitizedConn := sanitizeConnForLog(connStr, resolvedPass)
 		out(fmt.Sprintf("%s OK: regenerado desde _ORIGINAL.exe (%s, %d logos, %d etiquetas)",
@@ -484,13 +499,91 @@ func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
 		}
 	}
 
-	if !cfg.UseWinAuth && resolvedPass != "" {
-		if err := PatchCrystalODBCBridge(cfg.AppDir, resolvedPass, out); err != nil {
-			out("Aviso: No se pudo configurar el puente ODBC de Crystal: " + err.Error())
+	if !cfg.UseWinAuth {
+		repDir := filepath.Join(cfg.AppDir, "Reportes")
+		if _, err := os.Stat(repDir); err == nil {
+			patched, err := PatchReportsConnections(repDir, out)
+			if err != nil {
+				return fmt.Errorf("parcheando conexiones Crystal: %w", err)
+			}
+			out(fmt.Sprintf("Conexiones Crystal: %d plantillas, %d sustituciones", patched.Files, patched.Occurrences))
+			manifest.ReportsFiles = patched.Files
+			manifest.ReportOccurrences = patched.Occurrences
 		}
+	}
+	if err := writeGenerationManifest(cfg.AppDir, manifest); err != nil {
+		return fmt.Errorf("escribiendo manifiesto de generación: %w", err)
 	}
 
 	return nil
+}
+
+type manifestFile struct {
+	Name   string `json:"name"`
+	Bytes  int    `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+type generationManifest struct {
+	Version           string         `json:"version"`
+	Source            string         `json:"source"`
+	SourceSHA256      string         `json:"source_sha256"`
+	Executables       []manifestFile `json:"executables"`
+	ReportsFiles      int            `json:"reports_files"`
+	ReportOccurrences int            `json:"report_occurrences"`
+}
+
+func sha256Hex(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+func writeGenerationManifest(appDir string, manifest generationManifest) error {
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(appDir, "AegisSetup.manifest.json")
+	tmp, err := os.CreateTemp(appDir, ".aegis-manifest-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(path)
+		if err2 := os.Rename(tmpPath, path); err2 != nil {
+			return err2
+		}
+	}
+	return nil
+}
+
+func recordManifestExecutable(appDir string, file manifestFile) error {
+	path := filepath.Join(appDir, "AegisSetup.manifest.json")
+	manifest := generationManifest{Version: version.Current}
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	for i := range manifest.Executables {
+		if manifest.Executables[i].Name == file.Name {
+			manifest.Executables[i] = file
+			return writeGenerationManifest(appDir, manifest)
+		}
+	}
+	manifest.Executables = append(manifest.Executables, file)
+	return writeGenerationManifest(appDir, manifest)
 }
 
 func sanitizeConnForLog(connStr, pass string) string {
@@ -509,10 +602,7 @@ func DockerPatchBudget(user string) int {
 	return 20 - len("UID=") - len(";PWD=") - len(user)
 }
 
-// PatchDockerExe crea/copia _DOCKER.exe con UID/PWD embebidos sin alargar
-// el binario: reemplaza "Initial Catalog=SIDC" (20 chars) por
-// "UID=<user>;PWD=<pass>" que debe medir <=20 chars + null.
-// PatchDockerExe crea/copia _DOCKER.exe con UID/PWD embebidos sin alargar
+// PatchDockerExe crea/copia el ejecutable Docker versionado con UID/PWD embebidos sin alargar
 // el binario: reemplaza "Initial Catalog=SIDC" (20 chars) por
 // "UID=<user>;PWD=<pass>" que debe medir <=20 chars + null.
 // Es idempotente, genera respaldo y verifica integridad de tamaño.
@@ -523,8 +613,8 @@ func PatchDockerExe(appDir, user, pass string, out func(string)) error {
 		return fmt.Errorf("UID/PWD muy largos para el parche (max 20 chars en total 'UID=u;PWD=p'): recibí %d",
 			len("UID="+user+";PWD="+pass))
 	}
-	src := filepath.Join(appDir, "Sistema Intergrado de Controles y Presupuesto.exe")
-	dst := filepath.Join(appDir, "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe")
+	src := filepath.Join(appDir, SIDCExeName)
+	dst := filepath.Join(appDir, SIDCDockerExeName)
 
 	nu := append(utf16le("UID="+user+";PWD="+pass), 0, 0)
 	old := utf16le("Initial Catalog=SIDC")
@@ -535,7 +625,7 @@ func PatchDockerExe(appDir, user, pass string, out func(string)) error {
 	// Idempotencia: si dst ya existe y ya tiene la credencial exacta, no reescribir
 	if dstData, err := os.ReadFile(dst); err == nil {
 		if bytes.Contains(dstData, nu) {
-			out(fmt.Sprintf("_DOCKER.exe ya se encuentra configurado para %s", user))
+			out(fmt.Sprintf("%s ya se encuentra configurado para %s", SIDCDockerExeName, user))
 			return nil
 		}
 	}
@@ -566,16 +656,16 @@ func PatchDockerExe(appDir, user, pass string, out func(string)) error {
 	}
 
 	if len(data) != origLen {
-		return fmt.Errorf("integridad falló: tamaño de _DOCKER.exe (%d) difiere del original (%d)", len(data), origLen)
+		return fmt.Errorf("integridad falló: tamaño del ejecutable Docker (%d) difiere del original (%d)", len(data), origLen)
 	}
 
-	// Si existe Fotos/Principal.jpg, actualizamos los logos en _DOCKER.exe
+	// Si existe Fotos/Principal.jpg, actualizamos los logos en el ejecutable Docker
 	if logoPath := PrincipalLogoPath(appDir); logoPath != "" {
 		if logoFile, err := os.Open(logoPath); err == nil {
 			if img, _, err := image.Decode(logoFile); err == nil {
 				if patched, rep, err := PatchLogos(data, img); err == nil && rep.Total() > 0 {
 					data = patched
-					out(fmt.Sprintf("Logos actualizados en _DOCKER.exe (%d imágenes, %d etiquetas)",
+					out(fmt.Sprintf("Logos actualizados en ejecutable Docker (%d imágenes, %d etiquetas)",
 						rep.FormLogos+rep.Backgrounds+rep.Splashes, rep.Labels))
 				}
 			}
@@ -583,7 +673,7 @@ func PatchDockerExe(appDir, user, pass string, out func(string)) error {
 		}
 	}
 
-	// Respaldo de _DOCKER.exe si ya existía
+	// Respaldo del ejecutable Docker si ya existía
 	if _, err := os.Stat(dst); err == nil {
 		bakPath := dst + ".bak"
 		if curDst, err := os.ReadFile(dst); err == nil {
@@ -597,10 +687,21 @@ func PatchDockerExe(appDir, user, pass string, out func(string)) error {
 	}
 	defer os.Remove(tmpPath)
 
-	if err := os.WriteFile(dst, data, 0644); err != nil {
-		return err
+	if err := os.Rename(tmpPath, dst); err != nil {
+		_ = os.Remove(dst)
+		if err2 := os.Rename(tmpPath, dst); err2 != nil {
+			return err2
+		}
 	}
-	out(fmt.Sprintf("_DOCKER.exe OK (%d parche) -> %s", count, dst))
+	if fi, err := os.Stat(dst); err != nil {
+		return err
+	} else if fi.Size() != int64(origLen) {
+		return fmt.Errorf("integridad falló: tamaño publicado (%d) difiere del original (%d)", fi.Size(), origLen)
+	}
+	if err := recordManifestExecutable(appDir, manifestFile{Name: SIDCDockerExeName, Bytes: len(data), SHA256: sha256Hex(data)}); err != nil {
+		return fmt.Errorf("actualizando manifiesto Docker: %w", err)
+	}
+	out(fmt.Sprintf("%s OK (%d parche) -> %s", SIDCDockerExeName, count, dst))
 	return nil
 }
 
@@ -641,8 +742,8 @@ func PatchAppAndReports(appDir string, out func(string)) error {
 		optional bool
 	}
 	targets := []exeTarget{
-		{filename: "Sistema Intergrado de Controles y Presupuesto.exe", optional: false},
-		{filename: "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe", optional: true},
+		{filename: SIDCExeName, optional: false},
+		{filename: SIDCDockerExeName, optional: true},
 	}
 
 	patchedCount := 0

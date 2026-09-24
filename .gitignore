@@ -47,3 +47,19 @@ go.work.sum
 # Database backups (handled externally by backup-agent)
 *.bak
 
+
+
+# ---------------------------------------------------------------------------
+# Taller de agentes. Ver C:\DEV\SIDC\docs\agents\WORKSPACE.md.
+# ---------------------------------------------------------------------------
+
+# Indice de CodeGraph: se regenera por checkout, no se versiona.
+.codegraph/
+
+# Temporales de diagnostico.
+*.tmp
+*.exe~
+
+# NOTA: la allowlist de assets/legacy/crystal y assets/legacy/ocx de arriba es
+# DELIBERADA y no se toca. Es runtime propietario que tiene que viajar embebido
+# en el EXE para instalar en una PC limpia. Ver docs/agents/DECISIONS.md D7.

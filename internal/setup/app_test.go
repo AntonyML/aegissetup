@@ -49,7 +49,7 @@ func TestDockerPatchBudgetEsLaReglaDelParche(t *testing.T) {
 func exeFalso(t *testing.T, extra string) (dir, nombre string, tamano int) {
 	t.Helper()
 	dir = t.TempDir()
-	nombre = "Sistema Intergrado de Controles y Presupuesto.exe"
+	nombre = SIDCExeName
 	data := append([]byte("MZ...relleno..."), utf16le("Initial Catalog=SIDC")...)
 	data = append(data, []byte("...cola...")...)
 	data = append(data, utf16le(extra)...)
@@ -66,10 +66,10 @@ func TestPatchDockerExeNoAlargaElBinario(t *testing.T) {
 		t.Fatalf("parche fallo: %v", err)
 	}
 
-	dst := filepath.Join(dir, "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe")
+	dst := filepath.Join(dir, SIDCDockerExeName)
 	data, err := os.ReadFile(dst)
 	if err != nil {
-		t.Fatalf("no se creo el _DOCKER.exe: %v", err)
+		t.Fatalf("no se creó el ejecutable Docker versionado: %v", err)
 	}
 	if len(data) != tamano {
 		t.Errorf("el binario cambio de tamano: %d, era %d", len(data), tamano)
@@ -100,15 +100,15 @@ func TestPatchDockerExeRechazaClaveLargaSinEscribirNada(t *testing.T) {
 	if err := PatchDockerExe(dir, "dev", "123456789", func(string) {}); err == nil {
 		t.Fatal("acepto una clave que no cabe")
 	}
-	dst := filepath.Join(dir, "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe")
+	dst := filepath.Join(dir, SIDCDockerExeName)
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
-		t.Error("escribio el _DOCKER.exe aunque rechazo la clave")
+		t.Error("escribió el ejecutable Docker aunque rechazó la clave")
 	}
 }
 
 func TestPatchDockerExeFallaSiNoEncuentraElString(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Sistema Intergrado de Controles y Presupuesto.exe"),
+	if err := os.WriteFile(filepath.Join(dir, SIDCExeName),
 		[]byte("binario sin el string"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -165,8 +165,8 @@ func TestBuildExeConnString(t *testing.T) {
 		t.Errorf("debe incluir credenciales: %s", csShort)
 	}
 
-	// 3. SQL Auth con clave de producción (24 chars) -> omite Initial Catalog y cabe en <= 88
-	prodPass := "dwHmNy+rx+Ehu#q%EwW*vBrp" // 24 chars
+	// 3. SQL Auth con una muestra sintética de 24 chars -> omite Initial Catalog y cabe en <= 88
+	prodPass := strings.Repeat("p", 24)
 	csProd, err := BuildExeConnString("SIDC_SQL", "SIDC", "sidc", prodPass, false)
 	if err != nil {
 		t.Fatalf("BuildExeConnString clave prod falló: %v", err)
@@ -197,7 +197,8 @@ func TestPatchExeBuffer(t *testing.T) {
 	orig = append(orig, fakeTail...)
 	origLen := len(orig)
 
-	newConn := "Provider=MSDASQL.1;Data Source=SIDC_SQL;UID=sidc;PWD=SecretPass123;"
+	testPass := "TestPass123"
+	newConn := "Provider=MSDASQL.1;Data Source=SIDC_SQL;UID=sidc;PWD=" + testPass + ";"
 	patched, _, err := PatchExeBuffer(orig, newConn, nil)
 	if err != nil {
 		t.Fatalf("PatchExeBuffer falló: %v", err)
@@ -207,7 +208,7 @@ func TestPatchExeBuffer(t *testing.T) {
 	}
 
 	// Verificar que el slot contiene la nueva cadena
-	if !contieneBytes(patched, utf16le("UID=sidc;PWD=SecretPass123;")) {
+	if !contieneBytes(patched, utf16le("UID=sidc;PWD="+testPass+";")) {
 		t.Errorf("no se encontró la nueva credencial en el buffer parchado")
 	}
 	// Y que no queda Persist Security Info
@@ -273,7 +274,8 @@ func TestReadExeConnStringAndIdempotency(t *testing.T) {
 	emit := func(s string) { logs = append(logs, s) }
 
 	// Corrida 1: genera el ejecutable
-	if err := PatchSIDCApp(cfg, "dwHmNy+rx+Ehu#q%EwW*vBrp", emit); err != nil {
+	testPatchPass := strings.Repeat("z", 24)
+	if err := PatchSIDCApp(cfg, testPatchPass, emit); err != nil {
 		t.Fatalf("PatchSIDCApp corrida 1 falló: %v", err)
 	}
 
@@ -288,7 +290,7 @@ func TestReadExeConnStringAndIdempotency(t *testing.T) {
 
 	// Corrida 2: idempotente, no reescribe
 	logs = nil
-	if err := PatchSIDCApp(cfg, "dwHmNy+rx+Ehu#q%EwW*vBrp", emit); err != nil {
+	if err := PatchSIDCApp(cfg, testPatchPass, emit); err != nil {
 		t.Fatalf("PatchSIDCApp corrida 2 falló: %v", err)
 	}
 	foundAlineado := false
@@ -302,4 +304,3 @@ func TestReadExeConnStringAndIdempotency(t *testing.T) {
 		t.Errorf("corrida 2 debió reportar idempotencia (alineado): %v", logs)
 	}
 }
-

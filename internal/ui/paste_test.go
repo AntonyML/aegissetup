@@ -154,4 +154,3 @@ func TestKeyPasteTriggersCommand(t *testing.T) {
 		t.Fatal("ctrl+alt+v en screenServer debería retornar un tea.Cmd para leer el portapapeles")
 	}
 }
-

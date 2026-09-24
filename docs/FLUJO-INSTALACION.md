@@ -24,6 +24,7 @@ dice la URL exacta y en qué carpeta dejarlo, pero el archivo lo bajás vos.
 - La carpeta de SIDC ya copiada en la PC (el `.exe`, `Reportes/`, `Implode.dll`).
   Aegis **no** copia la aplicación: la verifica.
 - Sesión con permisos de administrador. Los pasos 3, 4 y la desinstalación piden UAC.
+- Print Spooler en ejecución y una impresora predeterminada (por ejemplo Microsoft Print to PDF).
 
 ### Cómo saber si estás listo
 
@@ -112,7 +113,10 @@ En orden:
 2. Copia los OCX legacy a `SysWOW64` y los registra con `regsvr32` (son los que dan error 339).
 3. Copia los 43 archivos del runtime de Crystal y registra los 4 componentes COM que usan los
    reportes.
-4. Verifica que estén el `.exe` de SIDC y las plantillas de `Reportes/`.
+4. Regenera los ejecutables desde `_ORIGINAL.exe` con nombres reproducibles (`_AegisSetup.exe` y
+   `_Docker_AegisSetup_v<versión>.exe`) y conserva los originales intactos.
+5. En SQL Auth cambia `Trusted_Connection=Yes` a `No` en todas las representaciones de conexión
+   de las plantillas `.rpt` (ASCII y UTF-16LE), mediante temporal y reemplazo atómico.
 
 Los OCX y Crystal salen **del propio `aegis.exe`**, no de una carpeta vieja: en una PC limpia no
 hay de dónde copiarlos.
@@ -128,7 +132,9 @@ queda en texto plano en el registro: es una bandera **solo para dev/docker**.
 .\aegis.exe check
 ```
 
-Valida las cuatro capas: TCP, SQL, DSN y ficheros. Es el único paso que prueba la cadena completa.
+Valida TCP, SQL, DSN, la cadena MSDASQL leída del propio ejecutable, ausencia de
+`Trusted_Connection=Yes`, apertura acotada de una plantilla Crystal, Print Spooler y la
+existencia de una impresora predeterminada. Cualquier fallo real devuelve 3.
 
 - Sale con **0** → SIDC funciona. Terminaste.
 - Sale con **3** → hay fallos; los imprime línea por línea. Miralos con la tabla de abajo.
@@ -149,8 +155,10 @@ Para dejarlo pegado en un correo de soporte:
 | `check` falla en TCP | El motor no está arriba o el puerto no es el que dice la config | Verificá el servicio de SQL Server y el `--server`/`db_mode`. |
 | `check` falla en SQL | Hay TCP pero no llega a la base | Fijate usuario, clave y que la base `SIDC` exista. |
 | `check` falla en DSN | El DSN 32-bit no está o quedó viejo | `aegis setup-app`. Tiene que ser el de 32 bits: un DSN de 64 bits deja a la app sin ver la base. |
+| `check` falla en reportes | Hay una plantilla con autenticación integrada o Crystal no puede abrir la muestra en 15 s | Corré `aegis setup-app`; verificá que el Spooler esté iniciado y que exista una impresora predeterminada. |
+| `check` falla en Spooler/impresora | El servicio está detenido o Windows no tiene impresora predeterminada | Iniciá Print Spooler y elegí una impresora predeterminada desde Windows. Aegis no cambia esos valores silenciosamente. |
 | SIDC abre y falla con **error 339** | Falta registrar un OCX | `aegis setup-app` de nuevo. Si te pide UAC, aceptalo: `regsvr32` sin permisos no registra nada y el error vuelve igual. |
-| SIDC abre y falla con **error 3146** | No llega a la base por el DSN | `aegis check` para confirmar cuál de las cuatro capas falla. Ojo: si corriste `aegis uninstall` sin `--keep-dsn`, el DSN se borró a propósito y hay que recrearlo con `aegis setup-app`. |
+| SIDC abre y falla con **error 3146** | No llega a la base por el DSN | `aegis check` para confirmar qué capa falla. Ojo: si corriste `aegis uninstall` sin `--keep-dsn`, el DSN se borró a propósito y hay que recrearlo con `aegis setup-app`. |
 | Los reportes de Crystal no abren | Falta el runtime o un componente COM | `aegis setup-app` y mirá la línea `CRYSTAL:` con los conteos. |
 | El UAC no aparece y el comando falla pidiendo permisos | Estás en una sesión sin UAC interactivo | Corré la consola **como Administrador** de entrada. Los pasos 3 y 4 escriben en `HKLM` y en `SysWOW64`. |
 | Todo anda pero `AEGIS_NO_ELEVAR` quedó seteado | Es la marca del proceso ya elevado, no una opción de uso | Sacala del entorno. Si queda puesta, Aegis no va a poder elevarse nunca más. |
@@ -185,7 +193,7 @@ Windows y otros programas VB6: borrarlos puede romper software que no es SIDC.
 ## Qué hace y qué no hace Aegis
 
 **Hace:** restaura la base, arma el DSN de 32 bits, instala y registra OCX y Crystal, verifica las
-cuatro capas, y se desinstala sin llevarse nada ajeno.
+capas de red, conexión, Crystal e impresión, y se desinstala sin llevarse nada ajeno.
 
 **No hace:**
 
