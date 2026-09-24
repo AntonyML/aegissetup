@@ -97,6 +97,7 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 
 	// Verificación de conexión real de la aplicación SIDC (MSDASQL 32-bit + ejecutable)
 	appExe := filepath.Join(cfg.AppDir, setup.SIDCExeName)
+	var appConnStr string
 	if _, err := os.Stat(appExe); err != nil {
 		out = append(out, Result{"SIDC app", false, "ejecutable principal no encontrado (" + setup.SIDCExeName + ")"})
 	} else if connStr, err := setup.ReadExeConnString(appExe); err != nil {
@@ -106,6 +107,7 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 	} else if ok, info := testMSDASQL32(ctx, connStr); !ok {
 		out = append(out, Result{"SIDC app", false, info})
 	} else {
+		appConnStr = connStr
 		out = append(out, Result{"SIDC app", true, "conexión 32-bit MSDASQL verificada"})
 	}
 
@@ -121,8 +123,8 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 		} else {
 			out = append(out, Result{"Reportes conexión", true, "sin Trusted_Connection=Yes en las plantillas"})
 		}
-		ok, info := openReportSample(ctx, repDir)
-		out = append(out, Result{"Reportes muestra", ok, info})
+		ok, info := openReportSample(ctx, repDir, cfg, appPass, appConnStr)
+		out = append(out, Result{"Reportes Rpt_Caja_Chica", ok, info})
 	}
 
 	out = append(out, checkPrinterEnvironment(ctx)...)

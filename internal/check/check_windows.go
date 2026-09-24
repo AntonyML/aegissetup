@@ -22,20 +22,20 @@ func testMSDASQL32(ctx context.Context, connStr string) (bool, string) {
 	tCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	escapedConn := strings.ReplaceAll(connStr, `"`, "`\"")
 	psScript := fmt.Sprintf(`
 try {
     $conn = New-Object -ComObject ADODB.Connection
     $conn.ConnectionTimeout = 5
-    $conn.Open("%s")
+    $conn.Open([Environment]::GetEnvironmentVariable('AEGIS_CHECK_CONN'))
     $conn.Close()
     Write-Output "OK"
 } catch {
     Write-Output ("FAIL: " + $_.Exception.Message)
 }
-`, escapedConn)
+`)
 
 	cmd := exec.CommandContext(tCtx, ps32, "-NoProfile", "-NonInteractive", "-Command", psScript)
+	cmd.Env = checkCommandEnv(map[string]string{"AEGIS_CHECK_CONN": connStr})
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if tCtx.Err() == context.DeadlineExceeded {
