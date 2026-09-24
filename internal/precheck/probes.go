@@ -31,6 +31,7 @@ func SondasReales() Sondas {
 		Base:    basePresente,
 		DSN:     dsnPresente,
 		Crystal: setup.CheckCrystal,
+		Printer: printerApta,
 		OCX: func(cfg config.Config) EstadoOCX {
 			// Los controles viajan dentro del propio binario, así que "no hay de dónde
 			// copiarlos" pasó a ser un caso de emergencia: un EXE mal armado, sin el

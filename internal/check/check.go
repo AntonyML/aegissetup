@@ -77,12 +77,14 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 		out = append(out, Result{"CRYSTAL runtime", true, "crpe32 + craxdrt + crviewer presentes"})
 	}
 
-	if !cfg.UseWinAuth && cfg.AppDir != "" {
+	if cfg.AppDir != "" {
 		bridgeDll := filepath.Join(cfg.AppDir, "p2sodbc.dll")
-		if _, err := os.Stat(bridgeDll); err != nil {
-			out = append(out, Result{"CRYSTAL bridge", false, "falta p2sodbc.dll en app_dir (reportes darían error 20599)"})
+		if _, err := os.Stat(bridgeDll); err == nil {
+			out = append(out, Result{"CRYSTAL bridge", false, "se encontró p2sodbc.dll local; el runtime de fábrica debe vivir en SysWOW64"})
+		} else if !os.IsNotExist(err) {
+			out = append(out, Result{"CRYSTAL bridge", false, "no se pudo verificar la ausencia de p2sodbc.dll local"})
 		} else {
-			out = append(out, Result{"CRYSTAL bridge", true, "p2sodbc.dll presente en app_dir"})
+			out = append(out, Result{"CRYSTAL bridge", true, "sin DLL local: usa p2sodbc.dll del runtime instalado"})
 		}
 	}
 
@@ -106,6 +108,24 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 	} else {
 		out = append(out, Result{"SIDC app", true, "conexión 32-bit MSDASQL verificada"})
 	}
+
+	if cfg.AppDir == "" {
+		out = append(out, Result{"Reportes muestra", false, "app_dir sin configurar; no se puede abrir un .rpt"})
+	} else {
+		repDir := filepath.Join(cfg.AppDir, "Reportes")
+		files, occurrences, err := setup.CountUnpatchedReports(repDir)
+		if err != nil {
+			out = append(out, Result{"Reportes conexión", false, "no se pudo leer Reportes: " + err.Error()})
+		} else if files > 0 {
+			out = append(out, Result{"Reportes conexión", false, fmt.Sprintf("%d plantillas aún fuerzan autenticación integrada (%d ocurrencias)", files, occurrences)})
+		} else {
+			out = append(out, Result{"Reportes conexión", true, "sin Trusted_Connection=Yes en las plantillas"})
+		}
+		ok, info := openReportSample(ctx, repDir)
+		out = append(out, Result{"Reportes muestra", ok, info})
+	}
+
+	out = append(out, checkPrinterEnvironment(ctx)...)
 
 	return out
 }

@@ -58,7 +58,7 @@ func newSetupAppCmd(res func() (config.Config, string, error)) *cobra.Command {
 	var o setupAppOpts
 	cmd := &cobra.Command{
 		Use:   "setup-app",
-		Short: "Setup 2/2: DSN SIDC_SQL 32-bit + OCX legacy + Crystal + verifica app (+parche _DOCKER en dev)",
+		Short: "Setup 2/2: DSN 32-bit + OCX/Crystal + regenera EXE/RPT y verifica app",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := res()
 			if err != nil {
@@ -72,7 +72,7 @@ func newSetupAppCmd(res func() (config.Config, string, error)) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&o.appPass, "app-password", "", "clave login app (o env AEGIS_SQL_PASSWORD)")
 	cmd.Flags().BoolVar(&o.savePWD, "save-pwd", false, "guardar PWD en el DSN (SOLO dev/docker, nunca prod)")
-	cmd.Flags().BoolVar(&o.patch, "patch-docker", false, "generar _DOCKER.exe con UID/PWD (solo dev/docker)")
+	cmd.Flags().BoolVar(&o.patch, "patch-docker", false, "generar ejecutable Docker versionado con UID/PWD (solo dev/docker)")
 	return cmd
 }
 
@@ -166,7 +166,7 @@ func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {
 	var fix bool
 	cmd := &cobra.Command{
 		Use:   "check",
-		Short: "Verifica que App y DB se hablan (TCP + SQL + DSN + ficheros)",
+		Short: "Verifica TCP + SQL + DSN + MSDASQL + Crystal + Spooler + impresora",
 		// Un reporte con código de salida no es un error de uso: volcar el "Usage"
 		// acá tapa con 15 líneas de ayuda lo único que el operador quiere leer.
 		SilenceUsage: true,
@@ -207,8 +207,8 @@ func newCheckCmd(res func() (config.Config, string, error)) *cobra.Command {
 func newRepairCmd(res func() (config.Config, string, error)) *cobra.Command {
 	var appPass string
 	cmd := &cobra.Command{
-		Use:   "repair",
-		Short: "Autodetecta y corrige DSN, Crystal runtime, controles OCX y logos de SIDC",
+		Use:          "repair",
+		Short:        "Autodetecta y corrige DSN, Crystal runtime, controles OCX y logos de SIDC",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := res()
@@ -257,8 +257,8 @@ type installCmdOpts struct {
 func newInstallCmd(res func() (config.Config, string, error)) *cobra.Command {
 	var o installCmdOpts
 	cmd := &cobra.Command{
-		Use:   "install",
-		Short: "Instalación completa no interactiva para terminales SIDC (DSN, OCX, Crystal, Logos, Check)",
+		Use:          "install",
+		Short:        "Instalación completa no interactiva para terminales SIDC (DSN, OCX, Crystal, Logos, Check)",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, path, err := res()
@@ -485,7 +485,7 @@ func newMenuCmd(res func() (config.Config, string, error), opciones func() opcio
 func newPatchLogosCmd(res func() (config.Config, string, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "patch-logos",
-		Short: "Actualiza logos en ejecutables (.exe, _DOCKER.exe) y reportes (.rpt) desde Fotos/Principal.jpg",
+		Short: "Actualiza logos en ejecutables AegisSetup y reportes (.rpt) desde Fotos/Principal.jpg",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := res()
 			if err != nil {

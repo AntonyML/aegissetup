@@ -21,6 +21,7 @@ func sondasOK() Sondas {
 		Base:     func(config.Config, string) (bool, string) { return true, "ok" },
 		DSN:      func(string) (bool, string) { return true, "ok" },
 		Crystal:  func() []string { return nil },
+		Printer:  func() (bool, string) { return true, "ok" },
 		OCX:      func(config.Config) EstadoOCX { return EstadoOCX{} },
 		Backup:   func(config.Config) (string, error) { return "SIDC.bak", nil },
 		AppFiles: func(string) []string { return nil },
@@ -282,6 +283,7 @@ func TestCadaRojoDiceQueHacer(t *testing.T) {
 		Base:    func(config.Config, string) (bool, string) { return false, "login failed" },
 		DSN:     func(string) (bool, string) { return false, "no existe el DSN" },
 		Crystal: func() []string { return []string{"crpe32.dll", "craxDrt.dll"} },
+		Printer: func() (bool, string) { return false, "sin impresora predeterminada" },
 		OCX: func(config.Config) EstadoOCX {
 			return EstadoOCX{FaltanEnSysWOW64: []string{"MSCOMCTL.OCX"}}
 		},
@@ -290,7 +292,7 @@ func TestCadaRojoDiceQueHacer(t *testing.T) {
 	}
 
 	rs := Run(cfg, "", s)
-	if got, want := len(Faltantes(rs)), 10; got != want {
+	if got, want := len(Faltantes(rs)), 11; got != want {
 		t.Fatalf("faltantes: got %d, want %d (%v)", got, want, ids(rs))
 	}
 	for _, r := range rs {

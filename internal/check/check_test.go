@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"aegis-setup/internal/config"
+	"aegis-setup/internal/setup"
 )
 
 func TestCheckNamedInstanceTCP(t *testing.T) {
@@ -65,7 +66,7 @@ func TestCheckSIDCAppUnpatchedExe(t *testing.T) {
 
 	// Crear exe con cadena sin credenciales
 	unpatched := append([]byte("MZ..."), setupUtf16le("Provider=MSDASQL.1;Persist Security Info=False;Data Source=SIDC_SQL;Initial Catalog=SIDC")...)
-	exePath := filepath.Join(dir, "Sistema Intergrado de Controles y Presupuesto.exe")
+	exePath := filepath.Join(dir, setup.SIDCExeName)
 	if err := os.WriteFile(exePath, unpatched, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -98,4 +99,3 @@ func setupUtf16le(s string) []byte {
 	}
 	return b
 }
-

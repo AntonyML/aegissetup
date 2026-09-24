@@ -120,12 +120,12 @@ type Model struct {
 	// srvInput y srvErr son el prompt del nombre del servidor en prod server.
 	// Campo propio y no el de las claves: uno se muestra y el otro no, y eso
 	// tiene que ser propiedad del campo, no de por dónde pasó el flujo.
-	srvInput textinput.Model
-	srvErr   string
+	srvInput  textinput.Model
+	srvErr    string
 	portInput textinput.Model
 	portErr   string
-	dbInput  textinput.Model
-	dbErr    string
+	dbInput   textinput.Model
+	dbErr     string
 	// presetWinAuth y presetSQLUser guardan la elección de autenticación del perfil pendiente.
 	presetWinAuth   *bool
 	presetSQLUser   string
@@ -1314,7 +1314,7 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 			return err
 		}
 		if !cfg.UseWinAuth {
-			dockerExe := filepath.Join(cfg.AppDir, "Sistema Intergrado de Controles y Presupuesto_DOCKER.exe")
+			dockerExe := filepath.Join(cfg.AppDir, setup.SIDCDockerExeName)
 			if _, err := os.Stat(dockerExe); err != nil {
 				appPass := secret(envAppPassword)
 				if appPass == "" {
@@ -1696,8 +1696,8 @@ func (m Model) viewAuth() string {
 		))
 	}
 	b.WriteString(s.HelpBar.Render(
-		s.Key.Render("[↑↓/Enter]")+s.Desc.Render(" elegir   ")+
-			s.Key.Render("[Esc]")+s.Desc.Render(" volver")))
+		s.Key.Render("[↑↓/Enter]") + s.Desc.Render(" elegir   ") +
+			s.Key.Render("[Esc]") + s.Desc.Render(" volver")))
 	return s.Box.Render(b.String())
 }
 
@@ -1734,7 +1734,7 @@ func (m Model) viewAppDir() string {
 	}
 	b.WriteString("\n" + s.SectionHeader.Render("QUÉ TIENE QUE TENER ESA CARPETA") + "\n")
 	for _, e := range [][2]string{
-		{"Sistema Intergrado de Controles y Presupuesto.exe", "el ejecutable de SIDC"},
+		{setup.SIDCExeName, "el ejecutable de SIDC"},
 		{"Reportes\\", "unos 57 archivos .rpt"},
 		{"Fotos\\Principal.jpg", "la foto de la pantalla principal"},
 	} {
@@ -1775,9 +1775,9 @@ func (m Model) viewConfirmInstall() string {
 	b.WriteString("  " + s.Success.Render("[✔]") + " " + s.Value.Render("Verificación") + "       " + s.Muted.Render("Diagnóstico integral: TCP, SQL, DSN, Crystal y archivos de app") + "\n\n")
 
 	b.WriteString(s.HelpBar.Render(
-		s.Key.Render("[Enter]")+s.Desc.Render(" confirmar e instalar   ")+
-			s.Key.Render("[C]")+s.Desc.Render(" configuración avanzada   ")+
-			s.Key.Render("[Esc]")+s.Desc.Render(" volver al menú")))
+		s.Key.Render("[Enter]") + s.Desc.Render(" confirmar e instalar   ") +
+			s.Key.Render("[C]") + s.Desc.Render(" configuración avanzada   ") +
+			s.Key.Render("[Esc]") + s.Desc.Render(" volver al menú")))
 	return s.Box.Render(b.String())
 }
 
@@ -1918,7 +1918,7 @@ func (m Model) viewHelp() string {
 func renderHelp(s Styles) string {
 	md := "# AEGIS ayuda\n\n" +
 		"Flujo por PC: 0 Instalación completa (db -> app -> check), o 1, 2 y 3 por separado.\n\n" +
-		"- dev docker: SQL Auth con AEGIS_SQL_PASSWORD. El TUI guarda PWD y genera _DOCKER.exe solo.\n" +
+		"- dev docker: SQL Auth con AEGIS_SQL_PASSWORD. El TUI guarda PWD y genera el ejecutable Docker versionado.\n" +
 		"- prod local/server: Windows Auth como CONTABILIDAD. Nunca guarda PWD ni pide claves.\n" +
 		"- Preset prod server: si el server no viene por --server, el TUI pregunta el nombre.\n" +
 		"- Claves por entorno o pedidas al inicio, jamás en config.json.\n\n" +

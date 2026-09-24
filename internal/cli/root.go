@@ -140,9 +140,9 @@ Subcomandos:
   install    Instalación completa no interactiva de SIDC (DSN, OCX, Crystal, Logos, Check).
   repair     Autodetecta y corrige DSN, Crystal runtime, controles OCX y logos de SIDC.
   setup-db   Restaura el .bak como SIDC, compat, collation, logins.
-  setup-app  DSN SIDC_SQL 32-bit + OCX legacy + verifica exe/reportes + parche _DOCKER.
-  check      Verifica que App y DB se hablan (TCP + SQL + DSN + ficheros).
-             Use --fix para reparar automáticamente componentes desalineados.
+  setup-app  DSN SIDC_SQL 32-bit + OCX/Crystal + regenera EXE/RPT desde _ORIGINAL.
+  check      Verifica TCP + SQL + DSN + MSDASQL + Crystal + Spooler + impresora.
+             Use --fix para reparar archivos/DSN; nunca cambia la impresora silenciosamente.
   checklist  Requisitos de la máquina en orden: qué falta, por qué y qué lo traba.
              Sale con código 3 si algo traba la instalación, y 0 si no traba nada.
   bak        De dónde bajar el .bak de SIDC y en qué carpeta dejarlo (Aegis no lo baja).

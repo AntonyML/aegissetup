@@ -33,6 +33,7 @@ const (
 	ReqBase    ID = "base"
 	ReqDSN     ID = "dsn"
 	ReqCrystal ID = "crystal"
+	ReqPrinter ID = "printer"
 	ReqOCX     ID = "ocx"
 	ReqApp     ID = "app"
 )
@@ -53,7 +54,7 @@ const (
 // cada corrida: un checklist que se reordena solo no se puede seguir.
 var ordenDeResolucion = []ID{
 	ReqAdmin, ReqMaquina, ReqDocker, ReqMotor, ReqODBC,
-	ReqBackup, ReqBase, ReqDSN, ReqCrystal, ReqOCX, ReqApp,
+	ReqBackup, ReqBase, ReqDSN, ReqCrystal, ReqPrinter, ReqOCX, ReqApp,
 }
 
 // trabaPorRequisito dice qué etapas quedan trabadas por cada requisito. Es la
@@ -77,6 +78,7 @@ var trabaPorRequisito = map[ID][]Etapa{
 	ReqODBC:    {EtapaInstall},
 	ReqBackup:  {EtapaSetupDB},
 	ReqCrystal: {EtapaInstall},
+	ReqPrinter: {EtapaInstall},
 	ReqApp:     {EtapaSetupApp, EtapaInstall},
 	ReqOCX:     nil,
 	ReqBase:    nil,
@@ -163,6 +165,7 @@ type Sondas struct {
 	Base     func(cfg config.Config, appPass string) (bool, string)
 	DSN      func(name string) (bool, string)
 	Crystal  func() []string
+	Printer  func() (bool, string)
 	OCX      func(cfg config.Config) EstadoOCX
 	Backup   func(cfg config.Config) (string, error)
 	AppFiles func(dir string) []string
@@ -232,6 +235,18 @@ func Run(cfg config.Config, appPass string, s Sondas) []Requisito {
 			"Los 57 reportes de SIDC se generan con este runtime.",
 			true, "el runtime embebido ya está en SysWOW64", ""))
 	}
+
+	if s.Printer == nil {
+		// Los stubs históricos de las pruebas no necesitan conocer esta sonda;
+		// una instalación real siempre la recibe desde SondasReales.
+		ok, det = true, "sonda no configurada en este stub"
+	} else {
+		ok, det = s.Printer()
+	}
+	out = append(out, veredicto(ReqPrinter, "Print Spooler e impresora predeterminada",
+		"Crystal Reports 8 puede colgarse sin el Spooler o una cola predeterminada.",
+		ok, det,
+		"Iniciá Print Spooler y elegí una impresora predeterminada desde Windows; Aegis no cambia esos valores."))
 
 	// Los OCX no bloquean nada: si faltan en SysWOW64 pero están en el origen,
 	// el propio Setup App los copia y registra. Bloquear acá dejaría al operador
