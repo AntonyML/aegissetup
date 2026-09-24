@@ -5,24 +5,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 )
 
-func sampleReport(repDir string) (string, error) {
-	ents, err := os.ReadDir(repDir)
+const reportUnderCheck = "Rpt_Caja_Chica.rpt"
+
+func reportPath(repDir string) (string, error) {
+	if repDir == "" {
+		return "", fmt.Errorf("carpeta Reportes vacía")
+	}
+	path := filepath.Join(repDir, reportUnderCheck)
+	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}
-	var names []string
-	for _, ent := range ents {
-		if !ent.IsDir() && strings.EqualFold(filepath.Ext(ent.Name()), ".rpt") {
-			names = append(names, ent.Name())
-		}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s es una carpeta", reportUnderCheck)
 	}
-	if len(names) == 0 {
-		return "", fmt.Errorf("no hay plantillas .rpt")
-	}
-	sort.Strings(names)
-	return filepath.Join(repDir, names[0]), nil
+	return path, nil
 }

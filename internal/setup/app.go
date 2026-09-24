@@ -350,6 +350,25 @@ func ReadExeConnString(exePath string) (string, error) {
 	return string(runes), nil
 }
 
+// ExeConnectionCredentials extrae UID y PWD de la cadena ya embebida en el
+// ejecutable. No imprime ni registra la clave: solo la entrega al consumidor
+// que necesita repetir el login de Crystal en el mismo proceso de diagnóstico.
+func ExeConnectionCredentials(connStr string) (user, password string) {
+	for _, field := range strings.Split(connStr, ";") {
+		parts := strings.SplitN(field, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		switch strings.ToUpper(strings.TrimSpace(parts[0])) {
+		case "UID":
+			user = strings.TrimSpace(parts[1])
+		case "PWD", "PASSWORD", "PASSWD":
+			password = strings.TrimSpace(parts[1])
+		}
+	}
+	return user, password
+}
+
 // PatchExeBuffer reemplaza la cadena de conexión y opcionalmente los logos en la imagen binaria en memoria.
 func PatchExeBuffer(origData []byte, connStr string, logoImg image.Image) ([]byte, PatchReport, error) {
 	if len(connStr) > MaxExeConnBudget {
@@ -502,7 +521,7 @@ func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
 	if !cfg.UseWinAuth {
 		repDir := filepath.Join(cfg.AppDir, "Reportes")
 		if _, err := os.Stat(repDir); err == nil {
-			patched, err := PatchReportsConnections(repDir, out)
+			patched, err := PatchReportsConnectionsForUser(repDir, cfg.SQLUser, out)
 			if err != nil {
 				return fmt.Errorf("parcheando conexiones Crystal: %w", err)
 			}
