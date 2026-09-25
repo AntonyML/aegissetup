@@ -63,6 +63,16 @@ Detalle y por qué de cada uno: skill `aegis-build-release`.
 
 ## Reglas que no se negocian acá
 
+- **Tu ruta.** `internal/{setup,check,cli,securestore,auth}`, `cmd`, `docker`,
+  `assets/embed*.go`, `.github`, `installer.iss`, `build.ps1`.
+  **La de Antigravity es** `internal/{ui,precheck,config}`, `scripts/`,
+  `README.md`, `HANDOFF.md`, `docs/`. **No toques la ajena** — ni "un carácter",
+  ni "para que compile". Ver `C:\DEV\SIDC\docs\agents\COORDINATION.md`.
+- **Zona conjunta:** `internal/ui/app.go`, `internal/cli/commands.go`,
+  `internal/setup/app.go` requieren **reclamo en `CLAIMS.md` antes** de tocarse, y
+  la extracción de la secuencia compartida es tuya.
+- **Antes de implementar:** `git grep` para ver si ya existe, y
+  `git log agent/antigravity/aegis` para ver si Antigravity ya lo hizo.
 - **TDD estricto** (`openspec/config.yaml` → `strict_tdd: true`). Los tests
   existentes son el contrato: **no los borres para que pase**.
 - **No debilites la allowlist** de `.gitignore` para `assets/legacy/`. Es
@@ -78,6 +88,8 @@ Detalle y por qué de cada uno: skill `aegis-build-release`.
   funciones en inglés en el paquete `setup`.
 - **No commiteás ni pusheás.** Eso lo hace el humano (salvo los archivos del
   arquitecto de entorno, que van en su propia rama).
+- **Revisión cruzada:** revisás el trabajo de Antigravity, y Antigravity revisa
+  el tuyo. Nadie aprueba su propio trabajo.
 
 ## Deuda técnica conocida
 
