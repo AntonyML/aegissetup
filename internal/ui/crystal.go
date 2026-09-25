@@ -26,6 +26,9 @@ var (
 	// probar el paso de Setup App de punta a punta sin escribir en el registro de la
 	// máquina donde se desarrolla.
 	escribirDSN = setup.WriteDSN
+	// setupPrintToPDF asegura Microsoft Print to PDF. Es una variable para poder
+	// probar el flujo sin invocar DISM o PowerShell en la máquina real.
+	setupPrintToPDF = setup.EnsurePrintToPDF
 )
 
 // instalarCrystal copia el runtime completo a SysWOW64 y registra los 4 componentes

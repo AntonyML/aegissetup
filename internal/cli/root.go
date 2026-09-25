@@ -207,6 +207,7 @@ Subcomandos:
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}))
 	cmd.AddCommand(newConfigureCmd(exeDir))
+	cmd.AddCommand(newSetupPDFCmd())
 
 	return cmd
 }

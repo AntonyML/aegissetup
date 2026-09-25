@@ -16,20 +16,33 @@ import (
 func checkPrinterEnvironment(ctx context.Context) []Result {
 	ps, err := exec.LookPath("powershell.exe")
 	if err != nil {
-		return []Result{{"Spooler", false, "PowerShell no disponible para consultar Print Spooler"}, {"Impresora predeterminada", false, "PowerShell no disponible para consultar impresoras"}}
+		return []Result{
+			{"Spooler", false, "PowerShell no disponible para consultar Print Spooler"},
+			{"Impresora predeterminada", false, "PowerShell no disponible para consultar impresoras"},
+			{"Microsoft Print to PDF", false, "PowerShell no disponible para consultar impresoras"},
+		}
 	}
 	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	script := `$ErrorActionPreference='Stop'; $s=Get-Service -Name Spooler; if($s.Status -ne 'Running'){ Write-Output 'SPOOLER=STOPPED'; exit 2 }; $p=@(Get-CimInstance Win32_Printer | Where-Object { $_.Default -eq $true }); if($p.Count -eq 0){ Write-Output 'SPOOLER=RUNNING'; Write-Output 'PRINTER=NONE'; exit 3 }; Write-Output 'SPOOLER=RUNNING'; Write-Output 'PRINTER=DEFAULT'`
+	script := `$ErrorActionPreference='Stop'; $s=Get-Service -Name Spooler; if($s.Status -ne 'Running'){ Write-Output 'SPOOLER=STOPPED'; exit 2 }; $printers=@(Get-CimInstance Win32_Printer); if(@($printers | Where-Object { $_.Default -eq $true }).Count -eq 0){ Write-Output 'PRINTER=NONE' } else { Write-Output 'PRINTER=DEFAULT' }; if(@($printers | Where-Object { $_.Name -eq 'Microsoft Print to PDF' }).Count -eq 0){ Write-Output 'PDF=NONE' } else { Write-Output 'PDF=INSTALLED' }; Write-Output 'SPOOLER=RUNNING'`
 	out, err := exec.CommandContext(tctx, ps, "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
 	if tctx.Err() == context.DeadlineExceeded {
-		return []Result{{"Spooler", false, "timeout consultando Print Spooler"}, {"Impresora predeterminada", false, "timeout consultando impresoras"}}
+		return []Result{
+			{"Spooler", false, "timeout consultando Print Spooler"},
+			{"Impresora predeterminada", false, "timeout consultando impresoras"},
+			{"Microsoft Print to PDF", false, "timeout consultando cola PDF"},
+		}
 	}
 	text := string(out)
 	running := strings.Contains(text, "SPOOLER=RUNNING")
 	printer := strings.Contains(text, "PRINTER=DEFAULT")
+	pdf := strings.Contains(text, "PDF=INSTALLED")
 	if err != nil && !running {
-		return []Result{{"Spooler", false, "Print Spooler detenido o no se pudo consultar"}, {"Impresora predeterminada", false, "no se puede evaluar mientras Spooler está detenido"}}
+		return []Result{
+			{"Spooler", false, "Print Spooler detenido o no se pudo consultar"},
+			{"Impresora predeterminada", false, "no se puede evaluar mientras Spooler está detenido"},
+			{"Microsoft Print to PDF", false, "no se puede evaluar mientras Spooler está detenido"},
+		}
 	}
 	spooler := Result{"Spooler", running, "Print Spooler en ejecución"}
 	if !running {
@@ -37,10 +50,14 @@ func checkPrinterEnvironment(ctx context.Context) []Result {
 	}
 	printerResult := Result{"Impresora predeterminada", printer, "hay una cola predeterminada disponible"}
 	if !printer {
-		printerResult.Info = "no hay impresora predeterminada; Aegis no cambia la selección"
+		printerResult.Info = "no hay impresora predeterminada; Crystal Reports puede colgarse"
 	}
 	if err != nil && !printer {
 		printerResult.Info = fmt.Sprintf("no se pudo consultar una impresora predeterminada: %s", strings.TrimSpace(text))
 	}
-	return []Result{spooler, printerResult}
+	pdfResult := Result{"Microsoft Print to PDF", pdf, "cola de impresión virtual PDF disponible"}
+	if !pdf {
+		pdfResult.Info = "cola no encontrada; Aegis la puede configurar automáticamente"
+	}
+	return []Result{spooler, printerResult, pdfResult}
 }

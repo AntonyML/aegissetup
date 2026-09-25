@@ -187,14 +187,17 @@ func iguales(a, b []string) bool {
 // stubDSN evita que la prueba escriba el DSN en el registro de la máquina.
 func stubDSN(t *testing.T, orden *[]string) {
 	t.Helper()
-	previo := escribirDSN
+	previoDSN, previoPDF := escribirDSN, setupPrintToPDF
 	escribirDSN = func(config.Config, string, bool, func(string)) error {
 		if orden != nil {
 			*orden = append(*orden, "dsn")
 		}
 		return nil
 	}
-	t.Cleanup(func() { escribirDSN = previo })
+	setupPrintToPDF = func(func(string)) error {
+		return nil
+	}
+	t.Cleanup(func() { escribirDSN, setupPrintToPDF = previoDSN, previoPDF })
 }
 
 // stubParche evita que la prueba reescriba el .exe de la app de verdad.

@@ -6,5 +6,9 @@ package check
 import "context"
 
 func checkPrinterEnvironment(ctx context.Context) []Result {
-	return []Result{{"Spooler", true, "solo Windows: no aplica fuera de Windows"}, {"Impresora predeterminada", true, "solo Windows: no aplica fuera de Windows"}}
+	return []Result{
+		{"Spooler", true, "solo Windows: no aplica fuera de Windows"},
+		{"Impresora predeterminada", true, "solo Windows: no aplica fuera de Windows"},
+		{"Microsoft Print to PDF", true, "solo Windows: no aplica fuera de Windows"},
+	}
 }

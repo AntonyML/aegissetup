@@ -1304,6 +1304,9 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 				emit("AVISO PUENTE CRYSTAL: " + err.Error())
 			}
 		}
+		if err := setupPrintToPDF(emit); err != nil {
+			emit("AVISO IMPRESORA PDF: " + err.Error())
+		}
 		if cfg.DbMode == config.DbDocker && !cfg.UseWinAuth {
 			if appPass == "" {
 				return fmt.Errorf("falta %s para el parche _DOCKER", envAppPassword)

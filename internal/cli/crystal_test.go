@@ -192,7 +192,7 @@ func TestElParcheDockerSinClaveNoSeHace(t *testing.T) {
 // la app, y anota en qué orden pasaron las cosas.
 func stubPaso2(t *testing.T, orden *[]string) {
 	t.Helper()
-	dsnPrevio, parchePrevio := escribirDSN, parcheDocker
+	dsnPrevio, parchePrevio, pdfPrevio := escribirDSN, parcheDocker, setupPrintToPDF
 	escribirDSN = func(config.Config, string, bool, func(string)) error {
 		if orden != nil {
 			*orden = append(*orden, "dsn")
@@ -205,5 +205,8 @@ func stubPaso2(t *testing.T, orden *[]string) {
 		}
 		return nil
 	}
-	t.Cleanup(func() { escribirDSN, parcheDocker = dsnPrevio, parchePrevio })
+	setupPrintToPDF = func(func(string)) error {
+		return nil
+	}
+	t.Cleanup(func() { escribirDSN, parcheDocker, setupPrintToPDF = dsnPrevio, parchePrevio, pdfPrevio })
 }

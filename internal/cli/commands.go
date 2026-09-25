@@ -83,6 +83,8 @@ type setupAppOpts struct {
 	patch   bool
 }
 
+var setupPrintToPDF = setup.EnsurePrintToPDF
+
 // ejecutarSetupApp es el paso 2 completo: DSN, OCX legacy, runtime de Crystal y el
 // parche _DOCKER en dev. Está aparte del comando para poder probar el orden y el
 // alcance de los pasos que tocan la máquina sin escribir en el registro ni reescribir
@@ -109,6 +111,10 @@ func ejecutarSetupApp(cfg config.Config, o setupAppOpts, out func(string)) error
 		if err := setup.PatchSIDCApp(cfg, o.appPass, out); err != nil {
 			out("AVISO APP: " + err.Error())
 		}
+	}
+	// Asegurar Microsoft Print to PDF para exportar e imprimir reportes
+	if err := setupPrintToPDF(out); err != nil {
+		out("AVISO IMPRESORA PDF: " + err.Error())
 	}
 	if o.patch && !cfg.UseWinAuth {
 		if o.appPass == "" {
@@ -156,6 +162,13 @@ func ejecutarRepair(cfg config.Config, appPass string, out func(string)) error {
 		} else {
 			out("SIDC App: OK (ejecutable y logos sincronizados)")
 		}
+	}
+
+	// 5. Impresora virtual PDF
+	if err := setupPrintToPDF(out); err != nil {
+		out("AVISO IMPRESORA PDF: " + err.Error())
+	} else {
+		out("Microsoft Print to PDF: OK")
 	}
 
 	return nil
@@ -496,6 +509,19 @@ func newPatchLogosCmd(res func() (config.Config, string, error)) *cobra.Command 
 			}
 			out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
 			return setup.PatchAppAndReports(cfg.AppDir, out)
+		},
+	}
+}
+
+func newSetupPDFCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "setup-pdf",
+		Short: "Habilita y configura Microsoft Print to PDF para reportes",
+		Long:  "Verifica la característica opcional Printing-PrintToPDFServices-Features, la habilita con DISM si está desactivada y asegura la cola de impresión Microsoft Print to PDF.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := func(s string) { fmt.Fprintln(cmd.OutOrStdout(), s) }
+			out("== CONFIGURACIÓN MICROSOFT PRINT TO PDF ==")
+			return setupPrintToPDF(out)
 		},
 	}
 }
