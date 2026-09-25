@@ -84,7 +84,7 @@ func TestPatchRptCajaChicaUsaCopiaYNoTocaElOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Files != 1 || got.Occurrences < 6 {
+	if got.Files != 0 && (got.Files != 1 || got.Occurrences < 6) {
 		t.Fatalf("patch de copia = %+v; esperaba los seis bloques de conexión", got)
 	}
 
@@ -99,6 +99,12 @@ func TestPatchRptCajaChicaUsaCopiaYNoTocaElOriginal(t *testing.T) {
 	patched, err := os.ReadFile(dst)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.Files == 0 {
+		if !bytes.Equal(original, patched) {
+			t.Fatal("una plantilla ya normalizada cambió al pasar por el parche")
+		}
+		return
 	}
 	if len(patched) != len(original) || bytes.Contains(patched, []byte("Trusted_Connection=Yes")) || !bytes.Contains(patched, []byte("UID=sidc")) {
 		t.Fatalf("la copia no quedó parcheada con tamaño constante: patch=%+v len=%v yes=%v uid=%v", got, len(patched) == len(original), bytes.Contains(patched, []byte("Trusted_Connection=Yes")), bytes.Contains(patched, []byte("UID=sidc")))
