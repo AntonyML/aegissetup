@@ -42,6 +42,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; Binario principal de Aegis Setup
 Source: "bin\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Host x86 para Crystal Reports COM/ActiveX; Aegis.exe permanece x64
+Source: "bin\Aegis.ReportHost.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; Icono oficial de la aplicación
 Source: "assets\public\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Documentación y licencia

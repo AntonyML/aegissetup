@@ -98,7 +98,17 @@ Move-Item -Force $tmpExe $targetExe
 
 Write-Host "==> Binario generado: $targetExe ($([math]::Round((Get-Item $targetExe).Length / 1MB, 2)) MB)" -ForegroundColor Green
 
-# 5. Verificación de arranque del binario
+# 5. El visor ActiveX de Crystal corre fuera del proceso Go x64.
+$reportHostBuild = Join-Path $root "reporthost\build.ps1"
+if (Test-Path -LiteralPath $reportHostBuild) {
+    Write-Host "==> Compilando ReportHost x86 (STA + WinForms)..." -ForegroundColor Cyan
+    & $reportHostBuild
+    if ($LASTEXITCODE -ne 0) {
+        throw "Error: no se pudo compilar Aegis.ReportHost.exe"
+    }
+}
+
+# 6. Verificación de arranque del binario
 Write-Host "==> Verificando ejecución del binario..." -ForegroundColor Cyan
 & $targetExe --help | Out-Null
 if ($LASTEXITCODE -ne 0) {

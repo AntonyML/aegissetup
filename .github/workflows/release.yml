@@ -110,6 +110,10 @@ jobs:
           Write-Host "Compilando Aegis Setup versión $ver..."
           go build -v -trimpath -ldflags="-s -w -X aegis-setup/internal/version.Current=$ver" -o bin/aegis.exe ./cmd/aegis
 
+      - name: 🖥️ Compilar ReportHost x86
+        shell: pwsh
+        run: ./reporthost/build.ps1
+
       - name: 🛠️ Instalar Inno Setup
         run: choco install innosetup --no-progress
 
@@ -135,6 +139,7 @@ jobs:
           path: |
             dist/*.exe
             bin/aegis.exe
+            bin/Aegis.ReportHost.exe
           retention-days: 30
 
       - name: 🚀 Publicar GitHub Release
@@ -159,6 +164,7 @@ jobs:
           files: |
             dist/*.exe
             bin/aegis.exe
+            bin/Aegis.ReportHost.exe
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true

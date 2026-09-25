@@ -190,6 +190,7 @@ Los códigos de salida están documentados arriba, con el checklist.
 ```bash
 cd AegisSetup
 go build -o bin/aegis.exe ./cmd/aegis
+pwsh reporthost/build.ps1                         # host Crystal x86 (STA)
 
 ./bin/aegis configure --env dev --db-mode docker   # 1. config.json + kit de Docker
 ./bin/aegis checklist                               # 2. ¿la máquina está lista? (exit 3 = no)
@@ -197,6 +198,7 @@ docker compose -f "$env:ProgramData\AegisSetup\docker\docker-compose.yml" up -d 
 ./bin/aegis setup-db                                # 4. restaura el .bak como SIDC
 ./bin/aegis setup-app                               # 5. DSN + OCX + Crystal + verificación
 ./bin/aegis check                                   # 6. valida App ⇄ DB
+./bin/aegis view-report                             # 7. abre Rpt_Caja_Chica en Crystal x86
 ./bin/aegis menu                                    # o todo de un tirón desde la TUI
 ```
 
