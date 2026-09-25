@@ -24,7 +24,7 @@ func openReportSample(ctx context.Context, repDir string, cfg config.Config, app
 	if err != nil {
 		return false, reportUnderCheck + ": " + err.Error()
 	}
-	return openReportHost(ctx, path, cfg, appPass, appConnStr, "check")
+	return openReportHost(ctx, path, cfg, appPass, appConnStr, "check", "")
 }
 
 // OpenReportVisual abre Rpt_Caja_Chica en el host x86 y conserva el proceso hasta
@@ -34,7 +34,18 @@ func OpenReportVisual(ctx context.Context, repDir string, cfg config.Config, app
 	if err != nil {
 		return false, reportUnderCheck + ": " + err.Error()
 	}
-	return openReportHost(ctx, path, cfg, appPass, appConnStr, "view")
+	return openReportHost(ctx, path, cfg, appPass, appConnStr, "view", "")
+}
+
+// ExportReportPDF conserva Crystal solo para abrir, autenticar y leer el reporte.
+// La generación final la hace el puente moderno dentro de ReportHost, sin usar el
+// exportador PDF nativo de Crystal 8.5.
+func ExportReportPDF(ctx context.Context, repDir string, cfg config.Config, appPass, appConnStr, outputPath string) (bool, string) {
+	path, err := reportPath(repDir)
+	if err != nil {
+		return false, reportUnderCheck + ": " + err.Error()
+	}
+	return openReportHost(ctx, path, cfg, appPass, appConnStr, "export-pdf", outputPath)
 }
 
 type reportHostResponse struct {
@@ -47,7 +58,7 @@ type reportHostResponse struct {
 	Details      map[string]interface{} `json:"details"`
 }
 
-func openReportHost(ctx context.Context, reportPath string, cfg config.Config, appPass, appConnStr, mode string) (bool, string) {
+func openReportHost(ctx context.Context, reportPath string, cfg config.Config, appPass, appConnStr, mode, outputPath string) (bool, string) {
 	reportName := filepath.Base(reportPath)
 	host, err := reportHostPath()
 	if err != nil {
@@ -77,10 +88,15 @@ func openReportHost(ctx context.Context, reportPath string, cfg config.Config, a
 	}
 
 	args := []string{"--mode", mode, "--report", reportPath, "--dsn", dsn, "--database", database, "--user", user}
+	if outputPath != "" {
+		args = append(args, "--output", outputPath)
+	}
 	runCtx := ctx
 	cancel := func() {}
 	if mode == "check" {
 		runCtx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	} else if mode == "export-pdf" {
+		runCtx, cancel = context.WithTimeout(ctx, 90*time.Second)
 	}
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, host, args...)
@@ -109,6 +125,9 @@ func openReportHost(ctx context.Context, reportPath string, cfg config.Config, a
 	}
 	if mode == "view" {
 		return true, reportUnderCheck + ": viewer_ready y cierre limpio; COM liberado por ReportHost"
+	}
+	if mode == "export-pdf" {
+		return true, reportName + ": PDF generado; stage=pdf_ready elapsedMs=" + strconv.FormatInt(last.ElapsedMs, 10)
 	}
 	tables := ""
 	for _, event := range trace {
@@ -205,6 +224,12 @@ func reportHostTimeoutStage(trace []reportHostResponse) string {
 		return "set_report_source"
 	case "set_report_source":
 		return "view_report"
+	case "export_prepare", "modern_data_query":
+		return "modern_html"
+	case "modern_html":
+		return "pdf_render"
+	case "pdf_render":
+		return "pdf_ready"
 	default:
 		return trace[len(trace)-1].Stage
 	}

@@ -13,6 +13,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 & $csc /nologo /target:winexe /platform:x86 /optimize+ /out:$out `
     /reference:System.dll `
     /reference:System.Core.dll `
+    /reference:System.Data.dll `
     /reference:System.Drawing.dll `
     /reference:System.Windows.Forms.dll `
     /reference:Microsoft.CSharp.dll `

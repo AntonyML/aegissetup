@@ -16,3 +16,7 @@ func openReportSample(ctx context.Context, repDir string, cfg config.Config, app
 func OpenReportVisual(ctx context.Context, repDir string, cfg config.Config, appPass, appConnStr string) (bool, string) {
 	return false, reportUnderCheck + ": visor Crystal solo disponible en Windows"
 }
+
+func ExportReportPDF(ctx context.Context, repDir string, cfg config.Config, appPass, appConnStr, outputPath string) (bool, string) {
+	return false, reportUnderCheck + ": exportación PDF Crystal solo disponible en Windows"
+}

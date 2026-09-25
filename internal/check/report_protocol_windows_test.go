@@ -41,6 +41,12 @@ func TestReportHostTimeoutStageInfereLaSiguienteEtapa(t *testing.T) {
 	if got := reportHostTimeoutStage([]reportHostResponse{{Stage: "discard_saved_data", Success: true}}); got != "read_records" {
 		t.Fatalf("stage = %q, quiero read_records", got)
 	}
+	if got := reportHostTimeoutStage([]reportHostResponse{{Stage: "modern_data_query", Success: true}}); got != "modern_html" {
+		t.Fatalf("stage = %q, quiero modern_html", got)
+	}
+	if got := reportHostTimeoutStage([]reportHostResponse{{Stage: "modern_html", Success: true}}); got != "pdf_render" {
+		t.Fatalf("stage = %q, quiero pdf_render", got)
+	}
 }
 
 func contains(value, fragment string) bool {
