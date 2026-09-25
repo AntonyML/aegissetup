@@ -113,6 +113,10 @@ type Model struct {
 	// reacciona distinto a cada uno y la pantalla no debería decir "error"
 	// cuando la puerta hizo su trabajo.
 	bloqueo bool
+	// readyToOpen solo se activa cuando la instalación completa terminó bien.
+	// Así el TUI ofrece abrir el SIDC que acaba de preparar, pero nunca abre una
+	// estación a medias ni una corrida de reparación fallida.
+	readyToOpen bool
 	// primeraVez es "no hay config.json todavía". Mientras sea true no se mide
 	// nada: sin perfil elegido, el checklist mide el ambiente por defecto, que no
 	// es el de esta PC.
@@ -155,6 +159,10 @@ var menuItems = []menuEntry{
 	{"3", "Verificar", "Verifica que App y DB se hablan (check)", actCheck},
 	{"4", "Configuración avanzada", "Servidor, base de datos, credenciales y presets", actConfigAdvanced},
 }
+
+// launchSIDC es una seam pequeña para que la pantalla final se pueda probar sin
+// arrancar el ejecutable legacy durante los tests del TUI.
+var launchSIDC = setup.LaunchSIDC
 
 var advancedItems = []menuEntry{
 	{"1", "Configurar conexión", "Servidor, base de datos, autenticación y carpeta", actConfigManual},
@@ -316,6 +324,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lines = msg.lines
 		m.taskErr = msg.err
 		m.bloqueo = false
+		m.readyToOpen = msg.kind == taskInstall && msg.err == nil
 		m = m.setupViewport(m.doneBody(), 4, 2)
 		// Se recalcula el checklist: al terminar un paso se desbloquea el
 		// siguiente, y el operador lo tiene que ver sin pedirlo.
@@ -419,10 +428,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.verificando = true
 				return m, m.runChecks()
 			}
+			if (msg.String() == "a" || msg.String() == "A" || msg.String() == "enter") && m.screen == screenDone && m.readyToOpen {
+				if err := launchSIDC(m.cfg.AppDir); err != nil {
+					m.taskErr = err
+					m.readyToOpen = false
+					m = m.refreshViewportContent(m.doneBody(), 4, 2)
+					return m, nil
+				}
+				return m, tea.Quit
+			}
 			if msg.String() == "esc" || msg.String() == "enter" || msg.String() == "q" {
 				m.lines = nil
 				m.taskErr = nil
 				m.bloqueo = false
+				m.readyToOpen = false
 				// Si el perfil nunca se pudo guardar, volver al menú sería arrancar
 				// con el ambiente por defecto sin que nadie lo haya elegido: se
 				// vuelve a preguntar.
@@ -1875,6 +1894,12 @@ func (m Model) doneBody() string {
 		}
 		b.WriteString("  " + l)
 	}
+	if m.readyToOpen && m.taskErr == nil && !m.bloqueo {
+		if len(m.lines) > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("  SIDC está listo. Presioná [Enter] para abrirlo y cerrar Aegis (A también funciona).")
+	}
 	return b.String()
 }
 
@@ -1893,9 +1918,14 @@ func (m Model) viewDone() string {
 		header.WriteString(s.Success.Render("✔ OK") + "\n\n")
 	}
 
-	footer := s.HelpBar.Render(
-		s.Key.Render("[↑↓/PgUp/PgDn]") + s.Desc.Render(" desplazar   ") +
-			s.Key.Render("[Esc/Enter]") + s.Desc.Render(" volver al menú"))
+	footerText := s.Key.Render("[↑↓/PgUp/PgDn]") + s.Desc.Render(" desplazar   ")
+	if m.readyToOpen && m.taskErr == nil && !m.bloqueo {
+		footerText += "   " + s.Key.Render("[Enter/A]") + s.Desc.Render(" abrir SIDC y cerrar Aegis") +
+			"   " + s.Key.Render("[Esc]") + s.Desc.Render(" volver al menú")
+	} else {
+		footerText += "   " + s.Key.Render("[Esc/Enter]") + s.Desc.Render(" volver al menú")
+	}
+	footer := s.HelpBar.Render(footerText)
 
 	if m.height <= 0 {
 		return s.Box.Render(header.String() + m.doneBody() + "\n\n" + footer)
@@ -1942,7 +1972,8 @@ func renderHelp(s Styles) string {
 		"- C muestra los requisitos de la PC (admin, SysWOW64, Docker, motor, driver ODBC, .bak, base, DSN, Crystal, OCX, archivos de SIDC).\n" +
 		"- Cada uno dice para qué sirve, qué hacer si falta y qué opción del menú traba.\n" +
 		"- Las opciones trabadas se ven en gris con el requisito que falta, y se desbloquean solas al resolverlo.\n" +
-		"- Check y los presets nunca se bloquean: son el diagnóstico y la configuración.\n\n"
+		"- Check y los presets nunca se bloquean: son el diagnóstico y la configuración.\n\n" +
+		"- Cuando Instalación completa termina bien, la pantalla final ofrece [Enter] Abrir SIDC y cerrar Aegis ([A] también funciona).\n"
 	out, err := glamour.Render(md, "dark")
 	if err != nil {
 		return md
