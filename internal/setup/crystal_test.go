@@ -319,3 +319,35 @@ func TestRegisterCOMConArchivoInexistenteFalla(t *testing.T) {
 		t.Errorf("registrar %s no falló", fantasma)
 	}
 }
+
+func TestPatchCrystalODBCBridge(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("puente Crystal ODBC solo aplica en Windows")
+	}
+	appDir := t.TempDir()
+	var logs []string
+	logFn := func(s string) { logs = append(logs, s) }
+
+	// Primera pasada con clave
+	err := PatchCrystalODBCBridge(appDir, "sidc", "TestPass123#", logFn)
+	if err != nil {
+		t.Fatalf("PatchCrystalODBCBridge falló: %v", err)
+	}
+
+	p2s := filepath.Join(appDir, "p2sodbc.dll")
+	fi, err := os.Stat(p2s)
+	if err != nil || fi.Size() == 0 {
+		t.Fatalf("no se generó p2sodbc.dll en appDir: %v", err)
+	}
+
+	// Idempotencia: segunda pasada con la misma clave no debe fallar
+	logs = nil
+	err = PatchCrystalODBCBridge(appDir, "sidc", "TestPass123#", logFn)
+	if err != nil {
+		t.Fatalf("segunda pasada falló: %v", err)
+	}
+	if len(logs) == 0 || !strings.Contains(logs[0], "ya se encuentra configurado") {
+		t.Errorf("segunda pasada debió ser idempotente, logs: %v", logs)
+	}
+}
+

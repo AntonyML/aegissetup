@@ -1299,6 +1299,11 @@ func runStep(ctx context.Context, cfg config.Config, k taskKind, secret func(str
 		if err := setup.PatchAppLogos(cfg.AppDir, emit); err != nil {
 			emit("AVISO LOGOS: " + err.Error())
 		}
+		if !cfg.UseWinAuth && appPass != "" {
+			if err := setup.PatchCrystalODBCBridge(cfg.AppDir, cfg.SQLUser, appPass, emit); err != nil {
+				emit("AVISO PUENTE CRYSTAL: " + err.Error())
+			}
+		}
 		if cfg.DbMode == config.DbDocker && !cfg.UseWinAuth {
 			if appPass == "" {
 				return fmt.Errorf("falta %s para el parche _DOCKER", envAppPassword)

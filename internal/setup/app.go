@@ -529,6 +529,11 @@ func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
 			manifest.ReportsFiles = patched.Files
 			manifest.ReportOccurrences = patched.Occurrences
 		}
+		if resolvedPass != "" {
+			if err := PatchCrystalODBCBridge(cfg.AppDir, cfg.SQLUser, resolvedPass, out); err != nil {
+				out("AVISO PUENTE CRYSTAL: " + err.Error())
+			}
+		}
 	}
 	if err := writeGenerationManifest(cfg.AppDir, manifest); err != nil {
 		return fmt.Errorf("escribiendo manifiesto de generación: %w", err)

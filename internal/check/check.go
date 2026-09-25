@@ -80,11 +80,11 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 	if cfg.AppDir != "" {
 		bridgeDll := filepath.Join(cfg.AppDir, "p2sodbc.dll")
 		if _, err := os.Stat(bridgeDll); err == nil {
-			out = append(out, Result{"CRYSTAL bridge", false, "se encontró p2sodbc.dll local; el runtime de fábrica debe vivir en SysWOW64"})
-		} else if !os.IsNotExist(err) {
-			out = append(out, Result{"CRYSTAL bridge", false, "no se pudo verificar la ausencia de p2sodbc.dll local"})
+			out = append(out, Result{"CRYSTAL bridge", true, "puente local p2sodbc.dll configurado"})
+		} else if !cfg.UseWinAuth {
+			out = append(out, Result{"CRYSTAL bridge", false, "falta p2sodbc.dll local en app_dir (requerido para autenticación SQL)"})
 		} else {
-			out = append(out, Result{"CRYSTAL bridge", true, "sin DLL local: usa p2sodbc.dll del runtime instalado"})
+			out = append(out, Result{"CRYSTAL bridge", true, "sin DLL local: usa p2sodbc.dll del runtime instalado (Windows Auth)"})
 		}
 	}
 
