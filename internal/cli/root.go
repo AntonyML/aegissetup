@@ -122,7 +122,7 @@ func asegurarAdmin(w io.Writer, sub string, args []string) (bool, int, error) {
 	return true, code, nil
 }
 
-// NewRootCmd crea el comando raíz y registra install, repair, setup-db, setup-app, check, checklist, bak, dashboard, menu, configure.
+// NewRootCmd crea el comando raíz y registra install, repair, setup-db, setup-app, check, view-report, checklist, bak, dashboard, menu, configure.
 func NewRootCmd(exeDir string, cfgLoader func(cfgPath string) (config.Config, error)) *cobra.Command {
 	var configPath string
 	var presetServer, appDir string
@@ -143,6 +143,7 @@ Subcomandos:
   setup-app  DSN SIDC_SQL 32-bit + OCX/Crystal + regenera EXE/RPT desde _ORIGINAL.
   check      Verifica TCP + SQL + DSN + MSDASQL + Crystal + Spooler + impresora.
              Use --fix para reparar archivos/DSN; nunca cambia la impresora silenciosamente.
+  view-report Abre Rpt_Caja_Chica en el ReportHost x86 y espera el cierre de la ventana.
   checklist  Requisitos de la máquina en orden: qué falta, por qué y qué lo traba.
              Sale con código 3 si algo traba la instalación, y 0 si no traba nada.
   bak        De dónde bajar el .bak de SIDC y en qué carpeta dejarlo (Aegis no lo baja).
@@ -178,6 +179,9 @@ Subcomandos:
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}))
 	cmd.AddCommand(newCheckCmd(func() (config.Config, string, error) {
+		return resolveCfg(exeDir, configPath, cfgLoader)
+	}))
+	cmd.AddCommand(newViewReportCmd(func() (config.Config, string, error) {
 		return resolveCfg(exeDir, configPath, cfgLoader)
 	}))
 	cmd.AddCommand(newChecklistCmd(func() (config.Config, string, error) {
