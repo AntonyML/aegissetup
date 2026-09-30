@@ -1200,11 +1200,6 @@ func (m Model) secret(name string) string {
 	if v, ok := m.secrets[name]; ok && v != "" {
 		return v
 	}
-	if name == envAppPassword {
-		if pwd := securestore.ResolvePassword("", func() string { return setup.DSNPassword(m.cfg.DsnName) }); pwd != "" {
-			return pwd
-		}
-	}
 	return os.Getenv(name)
 }
 
