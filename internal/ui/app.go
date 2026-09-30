@@ -1148,6 +1148,9 @@ func (m Model) updateAsk(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.secrets[name] = value
+			if name == envAppPassword {
+				_ = securestore.SavePassword(value)
+			}
 			m.askQueue = m.askQueue[1:]
 			m.askErr = ""
 			if len(m.askQueue) == 0 {
@@ -1197,6 +1200,11 @@ func (m Model) secret(name string) string {
 	if v, ok := m.secrets[name]; ok && v != "" {
 		return v
 	}
+	if name == envAppPassword {
+		if pwd := securestore.ResolvePassword("", func() string { return setup.DSNPassword(m.cfg.DsnName) }); pwd != "" {
+			return pwd
+		}
+	}
 	return os.Getenv(name)
 }
 
@@ -1224,16 +1232,6 @@ func (m Model) startItem(a action) (tea.Model, tea.Cmd) {
 				m.cfg.AppDir = `C:\SIDC`
 			} else if d := carpetaDelRepo(); d != "" {
 				m.cfg.AppDir = d
-			}
-		}
-		// En Docker siempre es SQL Auth. En prod remoto, autodetectar si es WORKGROUP vs Dominio
-		if m.cfg.DbMode != config.DbDocker && m.cfg.Server != "" {
-			if !setup.IsServerLocal(m.cfg.Server) {
-				bestAuth, _ := setup.DetectBestAuth(context.Background(), m.cfg.Server, m.cfg.Database)
-				m.cfg.UseWinAuth = bestAuth
-				if !bestAuth && (m.cfg.SQLUser == "" || m.cfg.SQLUser == "dev") {
-					m.cfg.SQLUser = "sidc"
-				}
 			}
 		}
 		m.screen = screenConfirmInstall
