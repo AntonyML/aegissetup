@@ -45,6 +45,8 @@ func TestIsServerLocal(t *testing.T) {
 
 func TestSQLConnStringNoSilentFallback(t *testing.T) {
 	t.Setenv("AEGIS_SQL_PASSWORD", "")
+	// La prueba no debe leer la credencial DPAPI del equipo del desarrollador.
+	t.Setenv("AEGIS_APPDATA", t.TempDir())
 	cfg := config.Config{
 		Server:     "192.168.2.145,1433",
 		Database:   "SIDC",
@@ -56,10 +58,10 @@ func TestSQLConnStringNoSilentFallback(t *testing.T) {
 	// Sin clave y sin DSN previo: NUNCA debe contener trusted_connection=yes ni password
 	connStr := SQLConnString(cfg, "")
 	if strings.Contains(connStr, "trusted+connection=yes") {
-		t.Errorf("SQLConnString con UseWinAuth=false y pass vacía cayó a trusted connection: %q", connStr)
+		t.Error("SQLConnString con UseWinAuth=false y pass vacía cayó a trusted connection")
 	}
 	if !strings.Contains(connStr, "sqlserver://sidc@192.168.2.145:1433") {
-		t.Errorf("SQLConnString inesperada: %q", connStr)
+		t.Error("SQLConnString inesperada; se omite la cadena para proteger las credenciales")
 	}
 }
 

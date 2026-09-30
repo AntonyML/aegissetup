@@ -12,8 +12,15 @@ import (
 	"aegis-setup/internal/setup"
 )
 
-func TestCheckNamedInstanceTCP(t *testing.T) {
+func testConfig() config.Config {
 	cfg := config.Default()
+	// El DSN cambia por proceso y nunca se registra: no se consulta SIDC_SQL.
+	cfg.DsnName = checkTestDSN
+	return cfg
+}
+
+func TestCheckNamedInstanceTCP(t *testing.T) {
+	cfg := testConfig()
 	cfg.Server = `192.168.2.145\SQLEXPRESS`
 	cfg.AppDir = t.TempDir()
 
@@ -34,7 +41,7 @@ func TestCheckNamedInstanceTCP(t *testing.T) {
 }
 
 func TestCheckSIDCAppMissingExe(t *testing.T) {
-	cfg := config.Default()
+	cfg := testConfig()
 	cfg.AppDir = t.TempDir() // empty dir, no exe
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -60,12 +67,12 @@ func TestCheckSIDCAppMissingExe(t *testing.T) {
 
 func TestCheckSIDCAppUnpatchedExe(t *testing.T) {
 	dir := t.TempDir()
-	cfg := config.Default()
+	cfg := testConfig()
 	cfg.AppDir = dir
 	cfg.UseWinAuth = false
 
 	// Crear exe con cadena sin credenciales
-	unpatched := append([]byte("MZ..."), setupUtf16le("Provider=MSDASQL.1;Persist Security Info=False;Data Source=SIDC_SQL;Initial Catalog=SIDC")...)
+	unpatched := append([]byte("MZ..."), setupUtf16le("Provider=MSDASQL.1;Data Source="+cfg.DsnName+";Initial Catalog=SIDC")...)
 	exePath := filepath.Join(dir, setup.SIDCExeName)
 	if err := os.WriteFile(exePath, unpatched, 0644); err != nil {
 		t.Fatal(err)

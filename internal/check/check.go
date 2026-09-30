@@ -104,11 +104,13 @@ func Run(ctx context.Context, cfg config.Config, appPass string) []Result {
 		out = append(out, Result{"SIDC app", false, "error leyendo cadena del ejecutable: " + err.Error()})
 	} else if !cfg.UseWinAuth && (!strings.Contains(connStr, "UID=") || !strings.Contains(connStr, "PWD=")) {
 		out = append(out, Result{"SIDC app", false, "ejecutable sin credenciales embebidas (fallaría como usuario '')"})
-	} else if ok, info := testMSDASQL32(ctx, connStr); !ok {
-		out = append(out, Result{"SIDC app", false, info})
 	} else {
-		appConnStr = connStr
-		out = append(out, Result{"SIDC app", true, "conexión 32-bit MSDASQL verificada"})
+		probe := testMSDASQL32(ctx, connStr)
+		out = append(out, Result{"SIDC app", probe.ConnectionOK, probe.ConnectionInfo})
+		out = append(out, Result{"SIDC fechas", probe.DatesOK, probe.DatesInfo})
+		if probe.ConnectionOK {
+			appConnStr = connStr
+		}
 	}
 
 	if cfg.AppDir == "" {

@@ -23,7 +23,8 @@ func WriteDSN(cfg config.Config, appPass string, savePWD bool, out func(string))
 	defer k.Close()
 
 	// Sanitizar entradas
-	driverPath := driverDLL(strings.TrimSpace(cfg.Driver))
+	settings := dsnConnectionSettings(cfg)
+	driverPath := settings["Driver"]
 	server := strings.TrimSpace(cfg.Server)
 	database := strings.TrimSpace(cfg.Database)
 	user := strings.TrimSpace(cfg.SQLUser)
@@ -36,17 +37,10 @@ func WriteDSN(cfg config.Config, appPass string, savePWD bool, out func(string))
 	}
 
 	set := func(n, v string) error { return k.SetStringValue(n, v) }
-	if err := set("Driver", driverPath); err != nil {
-		return err
-	}
-	if err := set("Server", server); err != nil {
-		return err
-	}
-	if err := set("Database", database); err != nil {
-		return err
-	}
-	if err := set("Language", "us_english"); err != nil {
-		return err
+	for _, field := range []string{"Driver", "Server", "Database", "Language"} {
+		if err := set(field, settings[field]); err != nil {
+			return err
+		}
 	}
 
 	if cfg.UseWinAuth {
@@ -91,6 +85,9 @@ func WriteDSN(cfg config.Config, appPass string, savePWD bool, out func(string))
 	if raw["Database"] != database {
 		return fmt.Errorf("readback DSN: Database esperada %q, encontrada %q", database, raw["Database"])
 	}
+	if !strings.EqualFold(raw["Language"], settings["Language"]) {
+		return fmt.Errorf("readback DSN: Language esperado %q (día/mes/año), encontrado %q", settings["Language"], raw["Language"])
+	}
 	expectedTrusted := "No"
 	if cfg.UseWinAuth {
 		expectedTrusted = "Yes"
@@ -113,15 +110,6 @@ func WriteDSN(cfg config.Config, appPass string, savePWD bool, out func(string))
 		out("DSN OK (SQL Auth): " + cfg.DsnName + " -> " + server + " UID=" + user)
 	}
 	return nil
-}
-
-func driverDLL(driver string) string {
-	switch driver {
-	case "SQL Server":
-		return `C:\Windows\SysWOW64\SQLSRV32.dll`
-	default:
-		return `C:\Windows\SysWOW64\msodbcsql17.dll`
-	}
 }
 
 func ensureUserDSNEntry(dsn string) error {
@@ -186,43 +174,10 @@ func ValidateDSN(cfg config.Config, appPass string) (bool, []string) {
 	if err != nil {
 		return false, []string{"el DSN " + cfg.DsnName + " no existe en el registro"}
 	}
-	var diffs []string
-	expectedDriver := driverDLL(strings.TrimSpace(cfg.Driver))
-	if !strings.EqualFold(m["Driver"], expectedDriver) {
-		diffs = append(diffs, fmt.Sprintf("Driver: esperado %q, actual %q", expectedDriver, m["Driver"]))
+	if !cfg.UseWinAuth && strings.TrimSpace(appPass) == "" {
+		appPass = securestore.ResolvePassword("", nil)
 	}
-	expectedServer := strings.TrimSpace(cfg.Server)
-	if m["Server"] != expectedServer {
-		diffs = append(diffs, fmt.Sprintf("Server: esperado %q, actual %q", expectedServer, m["Server"]))
-	}
-	expectedDB := strings.TrimSpace(cfg.Database)
-	if m["Database"] != expectedDB {
-		diffs = append(diffs, fmt.Sprintf("Database: esperada %q, actual %q", expectedDB, m["Database"]))
-	}
-	expectedTrusted := "No"
-	if cfg.UseWinAuth {
-		expectedTrusted = "Yes"
-	}
-	if !strings.EqualFold(m["Trusted_Connection"], expectedTrusted) {
-		diffs = append(diffs, fmt.Sprintf("Trusted_Connection: esperada %q, actual %q", expectedTrusted, m["Trusted_Connection"]))
-	}
-	if !cfg.UseWinAuth {
-		expectedUser := strings.TrimSpace(cfg.SQLUser)
-		if expectedUser == "" {
-			expectedUser = "sidc"
-		}
-		if m["LastUser"] != expectedUser {
-			diffs = append(diffs, fmt.Sprintf("LastUser: esperado %q, actual %q", expectedUser, m["LastUser"]))
-		}
-		pwd := strings.TrimSpace(appPass)
-		if pwd == "" {
-			pwd = securestore.ResolvePassword("", nil)
-		}
-		if pwd != "" && m["PWD"] != pwd {
-			diffs = append(diffs, "PWD: la clave almacenada en el registro tiene discrepancias o espacios residuales")
-		}
-	}
-	return len(diffs) == 0, diffs
+	return validateDSNSettings(cfg, m, appPass)
 }
 
 // RepairDSN repara el DSN escribiendo la configuración canónica limpia.

@@ -7,6 +7,9 @@ import (
 )
 
 func TestSaveAndGetPassword(t *testing.T) {
+	t.Setenv("AEGIS_APPDATA", t.TempDir())
+	t.Setenv("AEGIS_PROGRAMDATA", t.TempDir())
+	t.Setenv(envSQLPassword, "")
 	// Clean before
 	_ = DeletePassword()
 	defer DeletePassword()
@@ -40,6 +43,9 @@ func TestSaveAndGetPassword(t *testing.T) {
 }
 
 func TestResolvePasswordPrecedence(t *testing.T) {
+	t.Setenv("AEGIS_APPDATA", t.TempDir())
+	t.Setenv("AEGIS_PROGRAMDATA", t.TempDir())
+	t.Setenv(envSQLPassword, "")
 	_ = DeletePassword()
 	defer DeletePassword()
 
