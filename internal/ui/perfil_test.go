@@ -145,8 +145,16 @@ func TestPerfilProdServerPideElNombre(t *testing.T) {
 		t.Fatalf("pantalla = %v, quiero screenPort", m.screen)
 	}
 	m = pulsar(m, "enter")
+	if m.screen != screenDatabase {
+		t.Fatalf("pantalla = %v, quiero screenDatabase", m.screen)
+	}
+	m = pulsar(m, "enter")
+	if m.screen != screenAuth {
+		t.Fatalf("pantalla = %v, quiero screenAuth", m.screen)
+	}
+	m = pulsar(m, "enter")
 	if m.screen != screenAppDir {
-		t.Fatalf("pantalla = %v, quiero screenAppDir (después del puerto viene la carpeta)", m.screen)
+		t.Fatalf("pantalla = %v, quiero screenAppDir (después de auth viene la carpeta)", m.screen)
 	}
 	m = escribir(m, `D:\SIDC`)
 	if m.taskErr != nil {

@@ -30,6 +30,12 @@ func TestLaCarpetaDeSIDCSePreguntaEnLosTresPerfiles(t *testing.T) {
 		if m.screen == screenPort {
 			m = pulsar(m, "enter")
 		}
+		if m.screen == screenDatabase {
+			m = pulsar(m, "enter")
+		}
+		if m.screen == screenAuth {
+			m = pulsar(m, "enter")
+		}
 		if m.screen != screenAppDir {
 			t.Errorf("perfil %q -> pantalla %v, quiero screenAppDir", p.name, m.screen)
 			continue

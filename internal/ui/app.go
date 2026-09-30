@@ -147,6 +147,7 @@ type Model struct {
 	// presetAppDir es el flag --app-dir: cuando viene, la carpeta ya está dicha y no hay
 	// nada que preguntar (camino no interactivo).
 	presetAppDir  string
+	serverFlag    bool
 	authMgr       *auth.Manager
 	login         loginModel
 	authenticated bool
@@ -167,8 +168,8 @@ var launchSIDC = setup.LaunchSIDC
 var advancedItems = []menuEntry{
 	{"1", "Configurar conexión", "Servidor, base de datos, autenticación y carpeta", actConfigManual},
 	{"2", "Preset dev", "config dev docker localhost,14333", actPresetDev},
-	{"3", "Preset FEMUCARIBE", "FEMUCARIBE\\AdministradorRed, Windows Auth, SIDC", actPresetProdLocal},
-	{"4", "Preset prod server", "config prod servidor en la red, Windows Auth", actPresetProdServer},
+	{"3", "Preset prod local", "SIDC y SQL Server locales, Windows Auth", actPresetProdLocal},
+	{"4", "Preset prod server", "SQL Server en otra PC de la red", actPresetProdServer},
 	{"5", "Refrescar logos", "actualiza .exe y Reportes/ desde Fotos/Principal.jpg", actRefreshLogos},
 	{"6", "Setup DB", "restaura el .bak como SIDC (compat, collation, logins)", actSetupDB},
 }
@@ -179,8 +180,8 @@ var advancedItems = []menuEntry{
 // regla de ambiente el arranque y el menú dejarían configs distintas.
 var perfiles = []menuEntry{
 	{"1", "Pruebas", "SQL Server 2019 en Docker, en esta misma PC", actPresetDev},
-	{"2", "Servidor FEMUCARIBE", "FEMUCARIBE\\AdministradorRed, Windows Auth, SIDC", actPresetProdLocal},
-	{"3", "Producción en otro servidor", "SQL Server en otra PC de la red", actPresetProdServer},
+	{"2", "Producción en esta PC", "SIDC y SQL Server locales, Windows Auth", actPresetProdLocal},
+	{"3", "Producción en un servidor", "SQL Server en otra PC de la red", actPresetProdServer},
 }
 
 type authOption struct {
@@ -211,6 +212,7 @@ func NewModel(cfg config.Config, cfgPath string) Model {
 func (m Model) SetPresetServer(s string) Model {
 	m.presetServer = s
 	m.portConfirmed = true
+	m.serverFlag = true
 	return m
 }
 
@@ -538,18 +540,15 @@ func (m Model) elegirPerfil(p menuEntry) (tea.Model, tea.Cmd) {
 // medio contestar no puede quedar escrito en disco.
 func (m Model) aplicarPreset(a action) (tea.Model, tea.Cmd) {
 	m.perfilPendiente = a
-	if a == actConfigManual {
-		m.presetServer = ""
-		m.presetPort = ""
-		m.portConfirmed = false
-		m.presetDB = ""
-		m.presetWinAuth = nil
-		m.presetSQLUser = ""
-	} else if a == actPresetProdServer {
-		if m.presetServer == "" {
+	if a == actConfigManual || a == actPresetProdServer {
+		if !m.serverFlag {
+			m.presetServer = ""
 			m.presetPort = ""
 			m.portConfirmed = false
 		}
+		m.presetDB = ""
+		m.presetWinAuth = nil
+		m.presetSQLUser = ""
 	}
 	return m.siguientePregunta("")
 }
@@ -561,29 +560,42 @@ func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
 	a := m.perfilPendiente
 	if (a == actPresetProdServer || a == actConfigManual) && m.presetServer == "" {
 		m.srvInput = newServerInput(m.sugerenciaServer())
+		if val := m.servidorGuardado(); val != "" {
+			m.srvInput.SetValue(val)
+		}
 		m.srvErr = ""
 		m.screen = screenServer
 		return m, nil
 	}
 	if (a == actPresetProdServer || a == actConfigManual) && !m.portConfirmed {
 		m.portInput = newPortInput(m.sugerenciaPort())
+		if val := m.puertoGuardado(); val != "" {
+			m.portInput.SetValue(val)
+		}
 		m.portErr = ""
 		m.screen = screenPort
 		return m, nil
 	}
-	if a == actConfigManual && m.presetDB == "" {
+	if (a == actConfigManual || (a == actPresetProdServer && !m.serverFlag)) && m.presetDB == "" {
 		m.dbInput = newDatabaseInput(m.sugerenciaDatabase())
 		m.dbErr = ""
 		m.screen = screenDatabase
 		return m, nil
 	}
-	if a == actConfigManual && m.presetWinAuth == nil {
-		m.authCursor = 0
+	if (a == actConfigManual || (a == actPresetProdServer && !m.serverFlag)) && m.presetWinAuth == nil {
+		if !m.cfg.UseWinAuth && m.cfg.Env != "dev" {
+			m.authCursor = 1
+		} else {
+			m.authCursor = 0
+		}
 		m.screen = screenAuth
 		return m, nil
 	}
-	if a == actConfigManual && m.presetWinAuth != nil && !*m.presetWinAuth && m.presetSQLUser == "" {
+	if (a == actConfigManual || (a == actPresetProdServer && !m.serverFlag)) && m.presetWinAuth != nil && !*m.presetWinAuth && m.presetSQLUser == "" {
 		m.userInput = newServerInput(m.sugerenciaSQLUser())
+		if val := m.usuarioGuardado(); val != "" {
+			m.userInput.SetValue(val)
+		}
 		m.userErr = ""
 		m.screen = screenSQLUser
 		return m, nil
@@ -606,6 +618,41 @@ func (m Model) siguientePregunta(appDir string) (tea.Model, tea.Cmd) {
 	}
 	server := setup.UnirHostPuerto(m.presetServer, m.presetPort)
 	return m.aplicarPerfil(a, server, appDir)
+}
+
+func (m Model) servidorGuardado() string {
+	if m.presetServer != "" {
+		return m.presetServer
+	}
+	s := m.cfg.Server
+	if s == "" || strings.HasPrefix(s, "localhost") || strings.HasPrefix(s, ".") || s == "127.0.0.1" {
+		return ""
+	}
+	h, _ := setup.SepararHostPuerto(s)
+	return h
+}
+
+func (m Model) puertoGuardado() string {
+	if m.presetPort != "" {
+		return m.presetPort
+	}
+	if m.cfg.Env != "dev" {
+		_, p := setup.SepararHostPuerto(m.cfg.Server)
+		if p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+func (m Model) usuarioGuardado() string {
+	if m.presetSQLUser != "" {
+		return m.presetSQLUser
+	}
+	if m.cfg.SQLUser != "" && m.cfg.SQLUser != "dev" {
+		return m.cfg.SQLUser
+	}
+	return ""
 }
 
 // sugerenciaServer es lo único que podemos ofrecer como ejemplo. No se precarga en
@@ -746,6 +793,11 @@ func (m Model) updateServer(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			server := strings.TrimSpace(m.srvInput.Value())
 			if server == "" {
+				if val := m.servidorGuardado(); val != "" {
+					server = val
+				}
+			}
+			if server == "" {
 				m.srvErr = "Poné el nombre o IP del servidor (ej. 192.168.2.145, SIDC01 o CONTABILIDAD\\SQLEXPRESS)."
 				return m, nil
 			}
@@ -826,7 +878,7 @@ func (m Model) updateAuth(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.presetWinAuth = nil
-		if m.perfilPendiente == actConfigManual {
+		if m.perfilPendiente == actConfigManual || m.perfilPendiente == actPresetProdServer {
 			m.screen = screenDatabase
 		} else {
 			m.screen = screenServer
@@ -902,17 +954,13 @@ func (m Model) updateAppDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenConfirmInstall
 				return m, nil
 			}
-			if m.perfilPendiente == actConfigManual {
+			if m.perfilPendiente == actConfigManual || m.perfilPendiente == actPresetProdServer {
 				if m.presetWinAuth != nil && !*m.presetWinAuth {
 					m.screen = screenSQLUser
 					return m, nil
 				}
 				m.screen = screenAuth
 				return m, nil
-			}
-			if m.perfilPendiente == actPresetProdServer {
-				m.portConfirmed = false
-				return m.siguientePregunta("")
 			}
 			if m.primeraVez {
 				m.screen = screenPerfil
@@ -922,6 +970,11 @@ func (m Model) updateAppDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			dir := strings.TrimSpace(m.dirInput.Value())
+			if dir == "" {
+				if v, _ := m.sugerenciaAppDir(); v != "" {
+					dir = v
+				}
+			}
 			if dir == "" {
 				m.dirErr = "Poné la carpeta donde está SIDC (ej. C:\\SIDC). Es la que tiene el .exe de SIDC y la carpeta Reportes."
 				return m, nil
@@ -1033,6 +1086,8 @@ func (m Model) aplicarPerfil(a action, server, appDir string) (tea.Model, tea.Cm
 	m.presetDB = ""
 	m.presetWinAuth = nil
 	m.presetSQLUser = ""
+	m.presetAppDir = ""
+	m.serverFlag = false
 	m.primeraVez = false
 	m.srvErr = ""
 	m.portErr = ""
