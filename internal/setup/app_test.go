@@ -275,7 +275,7 @@ func TestReadExeConnStringAndIdempotency(t *testing.T) {
 
 	// Corrida 1: genera el ejecutable
 	testPatchPass := strings.Repeat("z", 24)
-	if err := PatchSIDCApp(cfg, testPatchPass, emit); err != nil {
+	if err := patchSIDCApp(cfg, testPatchPass, emit, func(string) {}); err != nil {
 		t.Fatalf("PatchSIDCApp corrida 1 falló: %v", err)
 	}
 
@@ -290,7 +290,7 @@ func TestReadExeConnStringAndIdempotency(t *testing.T) {
 
 	// Corrida 2: idempotente, no reescribe
 	logs = nil
-	if err := PatchSIDCApp(cfg, testPatchPass, emit); err != nil {
+	if err := patchSIDCApp(cfg, testPatchPass, emit, func(string) {}); err != nil {
 		t.Fatalf("PatchSIDCApp corrida 2 falló: %v", err)
 	}
 	foundAlineado := false

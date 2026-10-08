@@ -413,9 +413,14 @@ func PatchExeBuffer(origData []byte, connStr string, logoImg image.Image) ([]byt
 }
 
 // PatchSIDCApp regenera el ejecutable principal (y _DOCKER si aplica) a partir de _ORIGINAL.exe
-// con la cadena de conexión optimizada y los logos actualizados.
+// con la conexión y logos actualizados, y CacheIII100 para los baselines verificados.
 // Es idempotente y nunca modifica ni borra _ORIGINAL.exe ni Respaldo_SIDC.
 func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
+	return patchSIDCApp(cfg, appPass, out, killAppProcess)
+}
+
+// El callback de cierre permite verificar la generación sin tocar procesos reales.
+func patchSIDCApp(cfg config.Config, appPass string, out func(string), stopProcess func(string)) error {
 	if cfg.AppDir == "" {
 		return fmt.Errorf("app_dir no configurado")
 	}
@@ -451,7 +456,19 @@ func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
 		}
 	}
 
-	patchedData, rep, err := PatchExeBuffer(origData, connStr, logoImg)
+	generationData := origData
+	performanceProfile := ""
+	if IsThirdReportCacheSupported(origData) {
+		generationData, err = PatchThirdReportCache(origData, 100)
+		if err != nil {
+			return fmt.Errorf("aplicando caché del tercer informe: %w", err)
+		}
+		performanceProfile = "third-report-cache-100"
+		out("Caché ADO del tercer informe: CacheSize=100")
+	} else {
+		out("AVISO CACHÉ III: la versión de _ORIGINAL no está soportada; se genera sin el parche de rendimiento")
+	}
+	patchedData, rep, err := PatchExeBuffer(generationData, connStr, logoImg)
 	if err != nil {
 		return fmt.Errorf("parcheando buffer: %w", err)
 	}
@@ -467,25 +484,25 @@ func PatchSIDCApp(cfg config.Config, appPass string, out func(string)) error {
 		targets = append(targets, targetExe{name: SIDCDockerExeName})
 	}
 
-	newConnBytes := utf16le(connStr)
 	manifest := generationManifest{
-		Version:      version.Current,
-		Source:       filepath.Base(origPath),
-		SourceSHA256: sha256Hex(origData),
+		Version:                  version.Current,
+		Source:                   filepath.Base(origPath),
+		SourceSHA256:             sha256Hex(origData),
+		LegacyPerformanceProfile: performanceProfile,
 	}
 
 	for _, t := range targets {
 		dst := filepath.Join(cfg.AppDir, t.name)
 
 		if curData, err := os.ReadFile(dst); err == nil && len(curData) == origLen {
-			if bytes.Contains(curData, newConnBytes) {
+			if bytes.Equal(curData, patchedData) {
 				manifest.Executables = append(manifest.Executables, manifestFile{Name: t.name, Bytes: len(curData), SHA256: sha256Hex(curData)})
 				out(fmt.Sprintf("%s: ya se encuentra configurado y alineado", t.name))
 				continue
 			}
 		}
 
-		killAppProcess(t.name)
+		stopProcess(t.name)
 
 		tmpPath := dst + ".tmp"
 		if err := os.WriteFile(tmpPath, patchedData, 0755); err != nil {
@@ -549,12 +566,13 @@ type manifestFile struct {
 }
 
 type generationManifest struct {
-	Version           string         `json:"version"`
-	Source            string         `json:"source"`
-	SourceSHA256      string         `json:"source_sha256"`
-	Executables       []manifestFile `json:"executables"`
-	ReportsFiles      int            `json:"reports_files"`
-	ReportOccurrences int            `json:"report_occurrences"`
+	Version                  string         `json:"version"`
+	Source                   string         `json:"source"`
+	SourceSHA256             string         `json:"source_sha256"`
+	Executables              []manifestFile `json:"executables"`
+	ReportsFiles             int            `json:"reports_files"`
+	ReportOccurrences        int            `json:"report_occurrences"`
+	LegacyPerformanceProfile string         `json:"legacy_performance_profile,omitempty"`
 }
 
 func sha256Hex(data []byte) string {
